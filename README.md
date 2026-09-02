@@ -112,3 +112,8 @@ Add `--json` to any command for JSON output.
 See [`docs/AGENTS.md`](docs/AGENTS.md) for the shared MCP setup and
 [`docs/WORKFLOW.md`](docs/WORKFLOW.md) for the suggested agent operating loop.
 Per-agent configs live in [`docs/agents/`](docs/agents/).
+
+## Documentation
+
+- [User Guide (English)](docs/guides/UserGuide.en.md)
+- [使用指南（简体中文）](docs/guides/UserGuide.zh-CN.md)
