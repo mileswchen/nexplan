@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NexPlan 项目管理</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a23; --panel2: #1e2230; --border: #2b3040;
+    --text: #e6e8ee; --muted: #8a90a3; --accent: #4f8cff; --accent2: #6f5cff;
+    --green: #35c26a; --yellow: #f5b942; --red: #f2545b; --cyan: #37b6d6; --magenta: #c66fe0;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px; }
+  a { color: var(--accent); text-decoration: none; }
+  .muted { color: var(--muted); }
+  .top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border);
+    background: var(--panel); position: sticky; top: 0; z-index: 20; flex-wrap: wrap; }
+  .brand { font-weight: 700; font-size: 18px; letter-spacing: .3px; }
+  .brand span { color: var(--accent); }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { background: var(--panel2); border: 1px solid var(--border); border-radius: 999px;
+    padding: 4px 10px; font-size: 12px; }
+  .chip b { color: var(--accent); }
+  .tabs { display: flex; gap: 6px; margin-left: auto; }
+  .tab { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 7px 16px;
+    border-radius: 999px; cursor: pointer; font-size: 13px; }
+  .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn { background: var(--panel2); border: 1px solid var(--border); color: var(--text); padding: 6px 14px;
+    border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.danger { color: var(--red); border-color: var(--red); }
+  .btn.sm { padding: 3px 9px; font-size: 12px; }
+  main { padding: 18px 20px; max-width: 1400px; margin: 0 auto; }
+  .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .col { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px;
+    min-height: 120px; }
+  .col h3 { margin: 4px 6px 10px; font-size: 13px; font-weight: 600; color: var(--muted);
+    display: flex; justify-content: space-between; align-items: center; }
+  .col h3 .count { font-weight: 700; color: var(--text); }
+  .card { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
+    margin-bottom: 9px; cursor: pointer; }
+  .card:hover { border-color: var(--accent); }
+  .card .id { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--accent); }
+  .card .title { margin: 4px 0; font-weight: 500; line-height: 1.35; }
+  .card .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 5px; }
+  .badge { padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+  .pri-P0 { background: rgba(242,84,91,.16); color: var(--red); }
+  .pri-P1 { background: rgba(245,185,66,.16); color: var(--yellow); }
+  .pri-P2 { background: rgba(55,182,214,.16); color: var(--cyan); }
+  .pri-P3 { background: rgba(138,144,163,.16); color: var(--muted); }
+  .sev-critical { background: rgba(242,84,91,.18); color: var(--red); }
+  .sev-major { background: rgba(245,185,66,.18); color: var(--yellow); }
+  .sev-minor { background: rgba(55,182,214,.18); color: var(--cyan); }
+  .sev-trivial { background: rgba(138,144,163,.18); color: var(--muted); }
+  .st { font-size: 11px; }
+  .st.backlog,.st.todo,.st.open { color: var(--muted); }
+  .st.in_progress { color: var(--yellow); }
+  .st.review { color: var(--cyan); }
+  .st.done,.st.fixed,.st.verified { color: var(--green); }
+  .st.blocked,.st.wontfix { color: var(--red); }
+  .assignee { color: var(--magenta); font-size: 12px; }
+  .tag { color: var(--muted); font-size: 12px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar input, .toolbar select { background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    padding: 6px 10px; border-radius: 8px; font-size: 13px; }
+  .toolbar .spacer { flex: 1; }
+  .grid2 { display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
+  @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
+  .panel h2 { margin: 0 0 12px; font-size: 15px; }
+  .list-item { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  .list-item:hover { background: var(--panel2); }
+  .list-item.active { background: var(--panel2); border: 1px solid var(--accent); }
+  .doc-body { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 14px;
+    white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.55;
+    min-height: 240px; }
+  textarea, input[type=text] { width: 100%; background: var(--panel2); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 10px; border-radius: 8px; font-family: inherit; font-size: 13px; }
+  textarea { min-height: 120px; font-family: ui-monospace, Menlo, monospace; }
+  label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 12px; }
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center;
+    justify-content: center; z-index: 100; padding: 20px; }
+  .modal-bg.open { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; width: 620px;
+    max-width: 100%; max-height: 90vh; overflow: auto; padding: 18px; }
+  .modal.wide { width: 860px; }
+  .modal h3 { margin: 0 0 10px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .note { border-left: 2px solid var(--accent); padding: 6px 10px; margin: 6px 0; background: var(--panel2);
+    border-radius: 0 6px 6px 0; font-size: 13px; }
+  .note .who { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); text-align: center; padding: 18px; }
+  .hidden { display: none !important; }
+  .diff { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+    white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="brand">Nex<span>Plan</span></div>
+  <div class="chips" id="chips"></div>
+  <div class="tabs">
+    <button class="tab active" data-tab="board">待办板</button>
+    <button class="tab" data-tab="bugs">缺陷</button>
+    <button class="tab" data-tab="docs">文档</button>
+  </div>
+  <button class="btn" id="refresh">刷新</button>
+</div>
+
+<main>
+  <!-- BOARD -->
+  <section id="view-board">
+    <div class="toolbar">
+      <input id="q" placeholder="搜索标题/描述…" />
+      <select id="filter-priority"><option value="">全部优先级</option>
+        <option>P0</option><option>P1</option><option>P2</option><option>P3</option></select>
+      <select id="filter-assignee"><option value="">全部负责人</option></select>
+      <div class="spacer"></div>
+      <button class="btn primary" id="new-item">+ 新建待办</button>
+    </div>
+    <div class="board" id="board"></div>
+  </section>
+
+  <!-- BUGS -->
+  <section id="view-bugs" class="hidden">
+    <div class="toolbar">
+      <input id="bq" placeholder="搜索缺陷…" />
+      <select id="b-severity"><option value="">全部级别</option>
+        <option>critical</option><option>major</option><option>minor</option><option>trivial</option></select>
+      <select id="b-status"><option value="">全部状态</option>
+        <option>open</option><option>in_progress</option><option>fixed</option><option>verified</option><option>wontfix</option></select>
+      <div class="spacer"></div>
+      <button class="btn primary" id="new-bug">+ 录入缺陷</button>
+    </div>
+    <div class="panel" id="bug-list"></div>
+  </section>
+
+  <!-- DOCS -->
+  <section id="view-docs" class="hidden">
+    <div class="toolbar">
+      <button class="btn primary" id="new-doc">+ 新建文档</button>
+    </div>
+    <div class="grid2">
+      <div class="panel" id="doc-list"></div>
+      <div class="panel" id="doc-view"><div class="empty">在左侧选择一个文档</div></div>
+    </div>
+  </section>
+</main>
+
+<!-- work item modal -->
+<div class="modal-bg" id="modal-bg">
+  <div class="modal" id="modal"></div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const api = {
+  get: (u) => fetch(u).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
+  send: (u, method, body) => fetch(u, { method, headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body || {}) }).then(r => { if (!r.ok) return r.json().then(x => { throw new Error(x.error || r.statusText); }); return r.json(); }),
+};
+let board = {};
+const STATUSES = ['backlog','todo','in_progress','review','done','blocked'];
+const STATUS_LABEL = { backlog:'待办', todo:'待开始', in_progress:'进行中', review:'评审中', done:'完成', blocked:'阻塞' };
+const STATUS_ORDER = ['open','in_progress','fixed','verified','wontfix','reopened'];
+const esc = (s) => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function loadSummary() {
+  board = await api.get('/api/board');
+  const keys = Object.entries(board.workItems);
+  const wTotal = keys.reduce((a,[k,v]) => a+v, 0);
+  const bTotal = board.bugs ? Object.values(board.bugs).reduce((a,v)=>a+v,0) : 0;
+  $('#chips').innerHTML =
+    `<span class="chip">待办 <b>${wTotal}</b></span>` +
+    keys.map(([k,v]) => `<span class="chip">${STATUS_LABEL[k]||k} <b>${v}</b></span>`).join('') +
+    `<span class="chip">缺陷 <b>${bTotal}</b></span>` +
+    `<span class="chip">文档 <b>${board.docs||0}</b></span>`;
+}
+
+async function loadBoard() {
+  const q = $('#q').value.trim();
+  const pri = $('#filter-priority').value;
+  const asg = $('#filter-assignee').value;
+  const params = new URLSearchParams();
+  if (q) params.set('query', q);
+  if (pri) params.set('priority', pri);
+  if (asg) params.set('assignee', asg);
+  const items = await api.get('/api/workitems?' + params.toString());
+  const byStatus = {};
+  for (const s of STATUSES) byStatus[s] = items.filter(i => i.status === s);
+  // build assignee filter options
+  const assignees = [...new Set(items.map(i => i.assignee).filter(Boolean))];
+  $('#filter-assignee').innerHTML = '<option value="">全部负责人</option>' +
+    assignees.map(a => `<option value="${esc(a)}">@${esc(a)}</option>`).join('');
+  $('#board').innerHTML = STATUSES.map(s => `
+    <div class="col">
+      <h3>${STATUS_LABEL[s]} <span class="count">${byStatus[s].length}</span></h3>
+      ${byStatus[s].map(cardHtml).join('') || '<div class="empty">空</div>'}
+    </div>`).join('');
+  bindCards();
+}
+
+function cardHtml(i) {
+  return `<div class="card" data-id="${esc(i.id)}">
+    <div class="id">${esc(i.id)}</div>
+    <div class="title">${esc(i.title)}</div>
+    <div class="meta">
+      <span class="badge pri-${esc(i.priority)}">${esc(i.priority)}</span>
+      ${i.assignee ? `<span class="assignee">@${esc(i.assignee)}</span>` : ''}
+      ${(i.tags||[]).slice(0,2).map(t => `<span class="tag">#${esc(t)}</span>`).join('')}
+    </div>
+  </div>`;
+}
+
+function bindCards() {
+  document.querySelectorAll('.card').forEach(c => {
+    c.onclick = () => openItem(c.dataset.id);
+  });
+}
+
+async function openItem(id) {
+  const i = await api.get('/api/workitems/' + id);
+  const modal = $('#modal');
+  modal.innerHTML = `
+    <h3>${esc(i.id)} · ${esc(i.title)}</h3>
+    <div class="row" style="margin-bottom:10px">
+      <span class="badge pri-${esc(i.priority)}">${esc(i.priority)}</span>
+      <span class="st ${esc(i.status)}">${STATUS_LABEL[i.status]||i.status}</span>
+      <span class="muted">${esc(i.type)}</span>
+      ${i.assignee ? `<span class="assignee">@${esc(i.assignee)}</span>` : ''}
+    </div>
+    ${i.description ? `<p class="muted">${esc(i.description)}</p>` : ''}
+    <div class="row">
+      <label style="margin:0">状态</label>
+      <select id="w-status">${STATUSES.map(s => `<option value="${s}" ${s===i.status?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')}</select>
+      <button class="btn sm" id="w-claim">开始 / 认领</button>
+      <button class="btn sm primary" id="w-complete">标记完成</button>
+    </div>
+    <label>备注</label>
+    <div id="w-notes">${(i.notes||[]).map(n => `<div class="note">${esc(n.body)} <span class="who">— ${esc(n.author)} ${esc(new Date(n.at).toLocaleString())}</span></div>`).join('') || '<div class="empty">暂无备注</div>'}</div>
+    <div class="row" style="margin-top:10px">
+      <input type="text" id="note-input" placeholder="添加备注…" />
+      <button class="btn" id="note-add">添加</button>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn" id="w-close">关闭</button>
+      <div class="spacer" style="flex:1"></div>
+      <button class="btn danger" id="w-delete-hint" style="display:none"></button>
+    </div>`;
+  $('.modal-bg').classList.add('open');
+  $('#w-status').onchange = async (e) => {
+    const r = await api.send('/api/workitems/' + id, 'PATCH', { status: e.target.value, author: 'user' });
+    await refresh();
+  };
+  $('#w-claim').onclick = async () => {
+    const asg = prompt('认领人（agent 或 user）：','user');
+    if (asg) { await api.send(`/api/workitems/${id}/claim`, 'POST', { assignee: asg }); await refresh(); }
+  };
+  $('#w-complete').onclick = async () => {
+    const note = prompt('完成备注：','');
+    await api.send(`/api/workitems/${id}/complete`, 'POST', { note: note || '', author: 'user' });
+    await refresh();
+  };
+  $('#note-add').onclick = async () => {
+    const v = $('#note-input').value.trim();
+    if (!v) return;
+    await api.send(`/api/workitems/${id}/note`, 'POST', { body: v, author: 'user' });
+    await openItem(id); await refresh();
+  };
+  $('#w-close').onclick = closeModal;
+}
+
+function closeModal() { $('#modal-bg').classList.remove('open'); }
+
+async function refresh() {
+  await loadSummary();
+  if (!$('#view-board').classList.contains('hidden')) await loadBoard();
+  if (!$('#view-bugs').classList.contains('hidden')) await loadBugs();
+  if (!$('#view-docs').classList.contains('hidden')) await loadDocsList();
+}
+
+// ---------------- bugs ----------------
+async function loadBugs() {
+  const q = $('#bq').value.trim();
+  const sev = $('#b-severity').value;
+  const st = $('#b-status').value;
+  const params = new URLSearchParams();
+  if (q) params.set('query', q);
+  if (sev) params.set('severity', sev);
+  if (st) params.set('status', st);
+  const bugs = await api.get('/api/bugs?' + params.toString());
+  $('#bug-list').innerHTML = bugs.map(b => `
+    <div class="list-item" data-id="${esc(b.id)}">
+      <div class="row">
+        <span class="id" style="font-family:monospace;color:var(--accent)">${esc(b.id)}</span>
+        <span class="badge sev-${esc(b.severity)}">${esc(b.severity)}</span>
+        <span class="st ${esc(b.status)}">${esc(b.status)}</span>
+        <b>${esc(b.title)}</b>
+        ${b.foundByAgent ? `<span class="assignee">by ${esc(b.foundByAgent)}</span>` : ''}
+        <div class="spacer" style="flex:1"></div>
+        ${b.status !== 'fixed' && b.status !== 'verified' ? `<button class="btn sm" data-fix="${esc(b.id)}">标记已修</button>` : ''}
+      </div>
+      ${b.evidence ? `<div class="muted" style="font-size:12px;margin-top:4px;font-family:monospace">${esc(b.evidence.slice(0,160))}</div>` : ''}
+    </div>`).join('') || '<div class="empty">暂无缺陷</div>';
+  document.querySelectorAll('[data-fix]').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      await api.send('/api/bugs/' + btn.dataset.fix, 'PATCH', { status: 'fixed', author: 'user' });
+      await refresh();
+    };
+  });
+  document.querySelectorAll('#bug-list .list-item').forEach(el => {
+    el.onclick = () => openBug(el.dataset.id);
+  });
+}
+
+async function openBug(id) {
+  const i = await api.get('/api/bugs');
+  const b = i.find(x => x.id === id);
+  if (!b) return;
+  const modal = $('#modal');
+  modal.innerHTML = `
+    <h3>${esc(b.id)} · ${esc(b.title)}</h3>
+    <div class="row" style="margin-bottom:10px">
+      <span class="badge sev-${esc(b.severity)}">${esc(b.severity)}</span>
+      <span class="st ${esc(b.status)}">${esc(b.status)}</span>
+      <span class="muted">${esc(b.foundBy)}${b.foundByAgent ? ' by '+esc(b.foundByAgent) : ''}</span>
+    </div>
+    <label>级别</label><select id="b-sev">${['critical','major','minor','trivial'].map(s => `<option ${s===b.severity?'selected':''}>${s}</option>`).join('')}</select>
+    <label>状态</label><select id="b-st">${STATUS_ORDER.map(s => `<option ${s===b.status?'selected':''}>${s}</option>`).join('')}</select>
+    ${b.description ? `<p class="muted" style="margin-top:10px">${esc(b.description)}</p>` : ''}
+    ${b.evidence ? `<label>证据</label><div class="doc-body">${esc(b.evidence)}</div>` : ''}
+    <div class="row" style="margin-top:14px"><button class="btn" id="b-close">关闭</button>
+      <button class="btn primary" id="b-save">保存</button></div>`;
+  $('.modal-bg').classList.add('open');
+  $('#b-close').onclick = closeModal;
+  $('#b-save').onclick = async () => {
+    await api.send('/api/bugs/' + id, 'PATCH', { severity: $('#b-sev').value, status: $('#b-st').value, author: 'user' });
+    closeModal(); await refresh();
+  };
+}
+
+// ---------------- docs ----------------
+let docSlugs = [];
+async function loadDocsList() {
+  const docs = await api.get('/api/docs');
+  docSlugs = docs.map(d => d.slug);
+  $('#doc-list').innerHTML = docs.map(d => `
+    <div class="list-item" data-slug="${esc(d.slug)}">${esc(d.slug)} <span class="muted">v${d.meta.version}</span>
+      <span class="st">${d.meta.status}</span> <span class="muted">[${d.meta.type}]</span>
+      <div style="margin-top:2px" class="muted">${esc(d.meta.title)}</div></div>`).join('') || '<div class="empty">暂无文档</div>';
+  document.querySelectorAll('#doc-list .list-item').forEach(el => {
+    el.onclick = () => openDoc(el.dataset.slug);
+  });
+}
+
+async function openDoc(slug) {
+  const d = await api.get('/api/docs/' + slug);
+  const hist = await api.get('/api/docs/' + slug + '/history');
+  $('#doc-view').innerHTML = `
+    <div class="row">
+      <h2 style="margin:0">${esc(d.meta.title)}</h2>
+      <span class="muted">${esc(slug)} · v${d.meta.version}</span>
+      <span class="st">${esc(d.meta.status)}</span>
+    </div>
+    <div class="row" style="margin:10px 0">
+      <button class="btn sm" id="doc-edit">编辑（生成新版本）</button>
+      <button class="btn sm" id="doc-status">标记评审通过</button>
+    </div>
+    <div class="doc-body" id="doc-content">${esc(d.content)}</div>
+    <h3 style="margin:16px 0 8px">版本历史</h3>
+    <div class="doc-body" style="min-height:auto">${hist.map(v => `v${v.version} · ${v.sha.slice(0,8)} · ${esc(v.author)} · ${esc(new Date(v.date).toLocaleString())}<br>${esc(v.message)}`).join('<br><br>') || '暂无版本'}</div>`;
+  $('#doc-edit').onclick = () => editDoc(slug, d.content);
+  $('#doc-status').onclick = async () => {
+    await api.send('/api/docs/' + slug, 'PATCH', { status: 'approved', author: 'user' });
+    await openDoc(slug); await refresh();
+  };
+}
+
+function editDoc(slug, content) {
+  const modal = $('#modal');
+  modal.innerHTML = `
+    <h3>编辑文档（将创建新版本）</h3>
+    <label>Markdown 内容</label>
+    <textarea id="doc-body">${esc(content)}</textarea>
+    <div class="row" style="margin-top:12px"><button class="btn" id="doc-cancel">取消</button>
+      <button class="btn primary" id="doc-save">保存为新版本</button></div>`;
+  $('.modal-bg').classList.add('open');
+  $('#doc-cancel').onclick = closeModal;
+  $('#doc-save').onclick = async () => {
+    await api.send('/api/docs/' + slug, 'PATCH', { content: $('#doc-body').value, author: 'user' });
+    closeModal(); await openDoc(slug); await refresh();
+  };
+}
+
+// ---------------- new forms ----------------
+function newItemForm() {
+  const modal = $('#modal');
+  modal.innerHTML = `
+    <h3>新建待办</h3>
+    <label>标题</label><input type="text" id="n-title" />
+    <label>类型</label><select id="n-type">${['task','feature','refactor','chore','research','docs'].map(t=>`<option>${t}</option>`).join('')}</select>
+    <div class="row"><div style="flex:1"><label>优先级</label><select id="n-pri">${['P0','P1','P2','P3'].map(p=>`<option>${p}</option>`).join('')}</select></div>
+      <div style="flex:1"><label>标签（逗号分隔）</label><input type="text" id="n-tags" /></div></div>
+    <label>描述</label><textarea id="n-desc"></textarea>
+    <div class="row" style="margin-top:12px"><button class="btn" id="n-cancel">取消</button>
+      <button class="btn primary" id="n-save">创建</button></div>`;
+  $('.modal-bg').classList.add('open');
+  $('#n-cancel').onclick = closeModal;
+  $('#n-save').onclick = async () => {
+    const title = $('#n-title').value.trim();
+    if (!title) return alert('请输入标题');
+    await api.send('/api/workitems', 'POST', { title, type: $('#n-type').value, priority: $('#n-pri').value,
+      tags: $('#n-tags').value.split(',').map(t=>t.trim()).filter(Boolean), description: $('#n-desc').value, author: 'user' });
+    closeModal(); await refresh();
+  };
+}
+
+function newBugForm() {
+  const modal = $('#modal');
+  modal.innerHTML = `
+    <h3>录入缺陷</h3>
+    <label>标题</label><input type="text" id="b-title" />
+    <div class="row"><div style="flex:1"><label>级别</label><select id="b-sev">${['critical','major','minor','trivial'].map(s=>`<option>${s}</option>`).join('')}</select></div>
+      <div style="flex:1"><label>标签</label><input type="text" id="b-tags" /></div></div>
+    <label>证据（堆栈/日志）</label><textarea id="b-evidence"></textarea>
+    <label>描述</label><textarea id="b-desc"></textarea>
+    <div class="row" style="margin-top:12px"><button class="btn" id="b-cancel">取消</button>
+      <button class="btn primary" id="b-save">创建</button></div>`;
+  $('.modal-bg').classList.add('open');
+  $('#b-cancel').onclick = closeModal;
+  $('#b-save').onclick = async () => {
+    const title = $('#b-title').value.trim();
+    if (!title) return alert('请输入标题');
+    await api.send('/api/bugs', 'POST', { title, severity: $('#b-sev').value,
+      evidence: $('#b-evidence').value, description: $('#b-desc').value,
+      tags: $('#b-tags').value.split(',').map(t=>t.trim()).filter(Boolean), author: 'user' });
+    closeModal(); await refresh();
+  };
+}
+
+function newDocForm() {
+  const modal = $('#modal');
+  modal.innerHTML = `
+    <h3>新建文档</h3>
+    <label>标题</label><input type="text" id="d-title" />
+    <div class="row"><div style="flex:1"><label>类型</label><select id="d-type">${['design','decision','adr','architecture','notes'].map(t=>`<option>${t}</option>`).join('')}</select></div>
+      <div style="flex:1"><label>标签</label><input type="text" id="d-tags" /></div></div>
+    <label>Markdown 内容</label><textarea id="d-body"></textarea>
+    <div class="row" style="margin-top:12px"><button class="btn" id="d-cancel">取消</button>
+      <button class="btn primary" id="d-save">创建</button></div>`;
+  $('.modal-bg').classList.add('open');
+  $('#d-cancel').onclick = closeModal;
+  $('#d-save').onclick = async () => {
+    const title = $('#d-title').value.trim();
+    if (!title) return alert('请输入标题');
+    const d = await api.send('/api/docs', 'POST', { title, type: $('#d-type').value,
+      tags: $('#d-tags').value.split(',').map(t=>t.trim()).filter(Boolean), body: $('#d-body').value, author: 'user' });
+    closeModal();
+    await showTab('docs'); await refresh(); await openDoc(d.slug);
+  };
+}
+
+// ---------------- wiring ----------------
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  $('#view-board').classList.toggle('hidden', name !== 'board');
+  $('#view-bugs').classList.toggle('hidden', name !== 'bugs');
+  $('#view-docs').classList.toggle('hidden', name !== 'docs');
+  refresh();
+}
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
+$('#refresh').onclick = refresh;
+$('#new-item').onclick = newItemForm;
+$('#new-bug').onclick = newBugForm;
+$('#new-doc').onclick = newDocForm;
+$('#modal-bg').onclick = (e) => { if (e.target === e.currentTarget) closeModal(); };
+$('#q').oninput = debounce(loadBoard, 300);
+$('#bq').oninput = debounce(loadBugs, 300);
+$('#filter-priority').onchange = loadBoard;
+$('#filter-assignee').onchange = loadBoard;
+$('#b-severity').onchange = loadBugs;
+$('#b-status').onchange = loadBugs;
+
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+refresh();
+setInterval(() => { if (!document.hidden) refresh(); }, 15000);
+</script>
+</body>
+</html>
