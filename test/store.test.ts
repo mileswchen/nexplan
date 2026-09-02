@@ -174,6 +174,15 @@ describe('docs', () => {
     const second = await store.createDoc({ title: 'Same' });
     expect(second.slug).toBe('same-2');
   });
+
+  it('keeps CJK characters in slugs and versions them', async () => {
+    const doc = await store.createDoc({ title: '下单设计', type: 'design', body: 'v1' });
+    expect(doc.slug).toBe('下单设计');
+    const updated = await store.updateDoc(doc.slug, { content: 'v2' });
+    expect(updated.meta.version).toBe(2);
+    const history = await store.docHistory(doc.slug);
+    expect(history.length).toBe(2);
+  });
 });
 
 describe('board summary', () => {

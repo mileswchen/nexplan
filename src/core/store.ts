@@ -500,15 +500,16 @@ export class Store {
   // --------------------------------------------------------------------- docs
 
   slugifyTitle(title: string): string {
+    // Unicode-aware slugification: keep letters and numbers from any script
+    // (so CJK titles don't collapse to an empty slug), replace everything else
+    // (punctuation, spaces) with hyphens.
     return (
       title
-        .toLowerCase()
         .normalize('NFKD')
-        .replace(/[^\w\s-]/g, '')
-        .trim()
-        .replace(/[\s_]+/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '') || 'doc'
+        .replace(/[^\p{L}\p{N}]+/gu, '-')
+        .replace(/^-+|-+$/g, '')
+        .toLowerCase()
+        .slice(0, 64) || 'doc'
     );
   }
 

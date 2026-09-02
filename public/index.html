@@ -359,8 +359,9 @@ async function loadDocsList() {
 }
 
 async function openDoc(slug) {
-  const d = await api.get('/api/docs/' + slug);
-  const hist = await api.get('/api/docs/' + slug + '/history');
+  const s = encodeURIComponent(slug);
+  const d = await api.get('/api/docs/' + s);
+  const hist = await api.get('/api/docs/' + s + '/history');
   $('#doc-view').innerHTML = `
     <div class="row">
       <h2 style="margin:0">${esc(d.meta.title)}</h2>
@@ -376,7 +377,7 @@ async function openDoc(slug) {
     <div class="doc-body" style="min-height:auto">${hist.map(v => `v${v.version} · ${v.sha.slice(0,8)} · ${esc(v.author)} · ${esc(new Date(v.date).toLocaleString())}<br>${esc(v.message)}`).join('<br><br>') || '暂无版本'}</div>`;
   $('#doc-edit').onclick = () => editDoc(slug, d.content);
   $('#doc-status').onclick = async () => {
-    await api.send('/api/docs/' + slug, 'PATCH', { status: 'approved', author: 'user' });
+    await api.send('/api/docs/' + s, 'PATCH', { status: 'approved', author: 'user' });
     await openDoc(slug); await refresh();
   };
 }
@@ -392,7 +393,7 @@ function editDoc(slug, content) {
   $('.modal-bg').classList.add('open');
   $('#doc-cancel').onclick = closeModal;
   $('#doc-save').onclick = async () => {
-    await api.send('/api/docs/' + slug, 'PATCH', { content: $('#doc-body').value, author: 'user' });
+    await api.send('/api/docs/' + encodeURIComponent(slug), 'PATCH', { content: $('#doc-body').value, author: 'user' });
     closeModal(); await openDoc(slug); await refresh();
   };
 }
