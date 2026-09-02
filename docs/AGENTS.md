@@ -50,10 +50,19 @@ If omitted, `NEXPLAN_AGENT` (or `agent`) is used.
 
 ## Per-agent config files
 
-- [Claude Code](agents/claude-code.md)
-- [Codex / Codex CLI](agents/codex.md)
-- [OpenCode](agents/opencode.md)
-- [dsh (DeepSeek Harness)](agents/dsh.md)
+Each is available in English and 简体中文.
+
+| Agent | English | 简体中文 |
+|---|---|---|
+| Claude Code | [claude-code.md](agents/claude-code.md) | [claude-code.zh-CN.md](agents/claude-code.zh-CN.md) |
+| Codex / Codex CLI | [codex.md](agents/codex.md) | [codex.zh-CN.md](agents/codex.zh-CN.md) |
+| OpenCode | [opencode.md](agents/opencode.md) | [opencode.zh-CN.md](agents/opencode.zh-CN.md) |
+| dsh (DeepSeek Harness) | [dsh.md](agents/dsh.md) | [dsh.zh-CN.md](agents/dsh.zh-CN.md) |
+
+> 中文版跨 Agent 概览见 [AGENTS.zh-CN.md](AGENTS.zh-CN.md)。
 
 Every agent that lacks MCP support can still drive the exact same board through the
 `nexplan` CLI (shell out). See [WORKFLOW.md](WORKFLOW.md) for the recommended loop.
+
+For the full human-facing docs, see the [User Guide](guides/UserGuide.en.md) /
+[使用指南](guides/UserGuide.zh-CN.md) and the [command cheat sheet](CheatSheet.md).

@@ -109,11 +109,38 @@ Add `--json` to any command for JSON output.
 
 ## Agent integration
 
-See [`docs/AGENTS.md`](docs/AGENTS.md) for the shared MCP setup and
+See [`docs/AGENTS.md`](docs/AGENTS.md) (or the Chinese overview
+[`docs/AGENTS.zh-CN.md`](docs/AGENTS.zh-CN.md)) for the shared MCP setup and
 [`docs/WORKFLOW.md`](docs/WORKFLOW.md) for the suggested agent operating loop.
-Per-agent configs live in [`docs/agents/`](docs/agents/).
+
+Per-agent configs live in [`docs/agents/`](docs/agents/) — each in **English and
+简体中文**:
+
+| Agent | English | 简体中文 |
+|---|---|---|
+| Claude Code | [`claude-code.md`](docs/agents/claude-code.md) | [`claude-code.zh-CN.md`](docs/agents/claude-code.zh-CN.md) |
+| Codex / Codex CLI | [`codex.md`](docs/agents/codex.md) | [`codex.zh-CN.md`](docs/agents/codex.zh-CN.md) |
+| OpenCode | [`opencode.md`](docs/agents/opencode.md) | [`opencode.zh-CN.md`](docs/agents/opencode.zh-CN.md) |
+| dsh (DeepSeek Harness) | [`dsh.md`](docs/agents/dsh.md) | [`dsh.zh-CN.md`](docs/agents/dsh.zh-CN.md) |
 
 ## Documentation
 
-- [User Guide (English)](docs/guides/UserGuide.en.md)
-- [使用指南（简体中文）](docs/guides/UserGuide.zh-CN.md)
+| Guide | English | 简体中文 |
+|---|---|---|
+| **User Guide** | [`UserGuide.en.md`](docs/guides/UserGuide.en.md) | [`UserGuide.zh-CN.md`](docs/guides/UserGuide.zh-CN.md) |
+| **Command Cheat Sheet** (bilingual) | [`docs/CheatSheet.md`](docs/CheatSheet.md) | — |
+
+The guides cover: what NexPlan does, install, the board & enum reference, the full CLI
+reference, MCP tools, the web dashboard, the agent workflow, git/versioning,
+configuration, and a troubleshooting FAQ — in both English and Chinese.
+
+## Quick start (fastest path)
+
+```bash
+export NEXPLAN_BOARD="$PWD/.nexplan"
+nexplan add "重构认证模块" --type refactor --priority P1 --manual
+nexplan list --status backlog
+nexplan claim WI-1 --assignee claude-code
+nexplan done WI-1 --note "完成"
+nexplan web
+```
