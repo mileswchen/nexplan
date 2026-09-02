@@ -118,6 +118,33 @@ export interface BoardActivity {
   at: string;
 }
 
+// ---- multi-user / multi-project ---------------------------------------------
+
+export type UserRole = 'admin' | 'member' | 'viewer';
+export type UserKind = 'human' | 'agent';
+
+export interface User {
+  id: string; // e.g. "xiaomo", "claude-code"
+  name: string;
+  kind: UserKind;
+  role: UserRole;
+  createdAt: string;
+}
+
+export interface Project {
+  key: string; // e.g. "nexplan"
+  name: string; // display name
+  description: string;
+  members: string[]; // user ids
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Per-project board summary (same shape as BoardSummary, scoped to a project). */
+export interface ProjectSummary extends BoardSummary {
+  projectKey: string;
+}
+
 export interface ListFilter {
   status?: WorkItemStatus | WorkItemStatus[];
   type?: WorkItemType | WorkItemType[];

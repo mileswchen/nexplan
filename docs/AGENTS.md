@@ -10,12 +10,14 @@ so one server serves every agent.
 command: node
 args:    ["<abs path>/nexplan/dist/mcp/server.js"]
 env:
-  NEXPLAN_BOARD:  /abs/path/to/your/.nexplan   # REQUIRED — where the data lives
-  NEXPLAN_AGENT:  claude-code                   # optional — default author attribution
+  NEXPLAN_BOARD:   /abs/path/to/your/.nexplan   # REQUIRED — where the data lives
+  NEXPLAN_PROJECT: default                      # optional — active project key
+  NEXPLAN_AGENT:   claude-code                   # optional — default author attribution
 ```
 
 > If you installed the CLI globally, you can also point the command at the package
-> binary. Either way, set `NEXPLAN_BOARD` so every agent shares one board.
+> binary. Either way, set `NEXPLAN_BOARD` so every agent shares one workspace.
+> Most tools accept an optional `project` argument that overrides `NEXPLAN_PROJECT`.
 
 ## Naming the agent
 
@@ -28,7 +30,10 @@ name so the git history and UI attribute the change correctly:
 
 If omitted, `NEXPLAN_AGENT` (or `agent`) is used.
 
-## The 20 tools
+## The 26 tools
+
+Most tools accept an optional `project` argument (defaults to `NEXPLAN_PROJECT` or the
+workspace default).
 
 | Tool | Purpose |
 |---|---|
@@ -47,6 +52,8 @@ If omitted, `NEXPLAN_AGENT` (or `agent`) is used.
 | `nexplan_bug_list` / `nexplan_bug_get` / `nexplan_bug_update` | Track bugs |
 | `nexplan_status` | Board summary + recent activity |
 | `nexplan_agent_next` | Suggest the next thing to pick up |
+| `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | Manage projects |
+| `nexplan_user_list` / `nexplan_user_add` / `nexplan_user_update` | Manage users (roles) |
 
 ## Per-agent config files
 

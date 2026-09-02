@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Store } from '../core/store.js';
+import { Workspace } from '../core/workspace.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 // `as const` tuples keep zod's inferred types as literal unions, which match the
@@ -11,6 +11,18 @@ const BUG_SEVERITIES = ['critical', 'major', 'minor', 'trivial'] as const;
 const BUG_STATUSES = ['open', 'in_progress', 'fixed', 'verified', 'wontfix', 'reopened'] as const;
 const DOC_TYPES = ['design', 'decision', 'adr', 'architecture', 'notes'] as const;
 const DOC_STATUS = ['draft', 'review', 'approved', 'superseded'] as const;
+const USER_ROLES = ['admin', 'member', 'viewer'] as const;
+const USER_KINDS = ['human', 'agent'] as const;
+
+const priorities = z.enum(PRIORITIES);
+const itemTypes = z.enum(ITEM_TYPES);
+const itemStatuses = z.enum(ITEM_STATUSES);
+const bugSeverities = z.enum(BUG_SEVERITIES);
+const bugStatuses = z.enum(BUG_STATUSES);
+const docTypes = z.enum(DOC_TYPES);
+const docStatus = z.enum(DOC_STATUS);
+const userRoles = z.enum(USER_ROLES);
+const userKinds = z.enum(USER_KINDS);
 
 // A tool handler returns the MCP CallToolResult. `text` is the universal
 // representation; `structuredContent` is an optional JSON view for typed clients.
@@ -31,16 +43,17 @@ function ok(data: unknown) {
   };
 }
 
-const priorities = z.enum(PRIORITIES);
-const itemTypes = z.enum(ITEM_TYPES);
-const itemStatuses = z.enum(ITEM_STATUSES);
-const bugSeverities = z.enum(BUG_SEVERITIES);
-const bugStatuses = z.enum(BUG_STATUSES);
-const docTypes = z.enum(DOC_TYPES);
-const docStatus = z.enum(DOC_STATUS);
+// Resolve the project + store + acting author for a tool call.
+// `project` defaults to $NEXPLAN_PROJECT, then the workspace default.
+async function projectStore(workspace: Workspace, args: Record<string, unknown>) {
+  const project = await workspace.resolveProject(args.project as string | undefined);
+  const store = workspace.getStore(project);
+  const actor = (args.author as string) || process.env.NEXPLAN_AGENT || 'agent';
+  return { store, project, actor };
+}
 
-export function registerNexplanTools(server: McpServer, store: Store): void {
-  const author = (v?: string) => v ?? 'agent';
+export function registerNexplanTools(server: McpServer, workspace: Workspace): void {
+  const projectOpt = z.string().optional().describe('Project key. Defaults to the workspace default project.');
 
   // ---------------------------------------------------------------- backlog
 
@@ -62,20 +75,23 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
       title: 'Add backlog items',
       description:
         'Add one or more work items to the backlog. Use this to enter decomposed tasks. ' +
-        'Set `author` to your agent name for attribution.',
+        'Set `author` to your agent name for attribution. `project` selects the project.',
       inputSchema: z.object({
         items: z.array(addItemSchema).min(1),
         author: z.string().optional().describe('Attribution (agent or user name).'),
+        project: projectOpt,
       }),
     },
     async (args) => {
+      const { store, actor } = await projectStore(workspace, args);
+      await workspace.assertCanWrite(actor);
       const created = [];
       for (const it of args.items) {
         created.push(
           await store.createWorkItem({
             ...it,
-            author: author(args.author),
-            source: args.author === 'user' ? 'manual' : it.source,
+            author: actor,
+            source: actor === 'user' ? 'manual' : it.source,
           }),
         );
       }
@@ -96,9 +112,13 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
         tags: z.array(z.string()).optional(),
         query: z.string().optional().describe('Substring match on title/description.'),
         limit: z.number().int().positive().optional(),
+        project: projectOpt,
       }),
     },
-    async (args) => ok(await store.listWorkItems(args)),
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      return ok(await store.listWorkItems(args as never));
+    },
   );
 
   server.registerTool(
@@ -106,9 +126,10 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
     {
       title: 'Get a backlog item',
       description: 'Fetch a single work item by id (e.g. WI-3).',
-      inputSchema: z.object({ id: z.string().describe('Work item id, e.g. WI-3.') }),
+      inputSchema: z.object({ id: z.string().describe('Work item id, e.g. WI-3.'), project: projectOpt }),
     },
     async (args) => {
+      const { store } = await projectStore(workspace, args);
       const item = await store.getWorkItem(args.id);
       if (!item) throw new Error(`work item not found: ${args.id}`);
       return ok(item);
@@ -121,15 +142,20 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
       title: 'Claim a backlog item',
       description:
         'Take ownership of a backlog item. Sets assignee and status to in_progress. ' +
-        'This is the step to call before starting work on an item.',
+        'Call before starting work on an item.',
       inputSchema: z.object({
         id: z.string().describe('Work item id, e.g. WI-3.'),
         assignee: z.string().describe('Who is claiming it (your agent name).'),
         status: itemStatuses.optional(),
         author: z.string().optional(),
+        project: projectOpt,
       }),
     },
-    async (args) => ok(await store.claimWorkItem(args.id, args.assignee, args.status ?? 'in_progress', author(args.author))),
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args);
+      await workspace.assertCanWrite(args.assignee || actor);
+      return ok(await store.claimWorkItem(args.id, args.assignee || actor, args.status ?? 'in_progress', actor));
+    },
   );
 
   server.registerTool(
@@ -148,11 +174,14 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
         tags: z.array(z.string()).optional(),
         estimate: z.number().nullish(),
         author: z.string().optional(),
+        project: projectOpt,
       }),
     },
     async (args) => {
-      const { id, author: aut, ...patch } = args;
-      return ok(await store.updateWorkItem(id, patch, author(aut)));
+      const { store, actor } = await projectStore(workspace, args);
+      await workspace.assertCanWrite(actor);
+      const { id, author: _a, project: _p, ...patch } = args;
+      return ok(await store.updateWorkItem(id, patch as never, actor));
     },
   );
 
@@ -168,9 +197,14 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
         note: z.string().optional().describe('Summary of what was done.'),
         closeLinkedBugs: z.boolean().optional().describe('Default true.'),
         author: z.string().optional(),
+        project: projectOpt,
       }),
     },
-    async (args) => ok(await store.completeWorkItem(args.id, { note: args.note, closeLinkedBugs: args.closeLinkedBugs, author: author(args.author) })),
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args);
+      await workspace.assertCanWrite(actor);
+      return ok(await store.completeWorkItem(args.id, { note: args.note, closeLinkedBugs: args.closeLinkedBugs, author: actor }));
+    },
   );
 
   server.registerTool(
@@ -191,9 +225,14 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
           )
           .min(1),
         author: z.string().optional(),
+        project: projectOpt,
       }),
     },
-    async (args) => ok(await store.decomposeWorkItem(args.parentId, args.children, author(args.author))),
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args);
+      await workspace.assertCanWrite(actor);
+      return ok(await store.decomposeWorkItem(args.parentId, args.children, actor));
+    },
   );
 
   server.registerTool(
@@ -205,31 +244,32 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
         id: z.string(),
         body: z.string().min(1),
         author: z.string().optional(),
+        project: projectOpt,
       }),
     },
-    async (args) => ok(await store.addWorkItemNote(args.id, args.body, author(args.author))),
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args);
+      await workspace.assertCanWrite(actor);
+      return ok(await store.addWorkItemNote(args.id, args.body, actor));
+    },
   );
 
   // ------------------------------------------------------------------- docs
 
   server.registerTool(
     'nexplan_docs_list',
-    {
-      title: 'List documents',
-      description: 'List design/decision documents with their metadata.',
-      inputSchema: z.object({}),
+    { title: 'List documents', description: 'List design/decision documents with their metadata.', inputSchema: z.object({ project: projectOpt }) },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      return ok(await store.listDocs());
     },
-    async () => ok(await store.listDocs()),
   );
 
   server.registerTool(
     'nexplan_docs_get',
-    {
-      title: 'Get a document',
-      description: 'Fetch a document by slug (file name without .md).',
-      inputSchema: z.object({ slug: z.string() }),
-    },
+    { title: 'Get a document', description: 'Fetch a document by slug (file name without .md).', inputSchema: z.object({ slug: z.string(), project: projectOpt }) },
     async (args) => {
+      const { store } = await projectStore(workspace, args);
       const doc = await store.getDoc(args.slug);
       if (!doc) throw new Error(`doc not found: ${args.slug}`);
       return ok(doc);
@@ -240,9 +280,7 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
     'nexplan_docs_create',
     {
       title: 'Create a document',
-      description:
-        'Create a new design/decision/ADR document. Agents should record their design ' +
-        'decisions here (e.g. ADRs). Content is markdown; version starts at 1.',
+      description: 'Create a new design/decision/ADR document. Content is markdown; version starts at 1.',
       inputSchema: z.object({
         title: z.string().min(1),
         type: docTypes.optional(),
@@ -251,18 +289,21 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
         tags: z.array(z.string()).optional(),
         slug: z.string().optional(),
         author: z.string().optional(),
+        project: projectOpt,
       }),
     },
-    async (args) => ok(await store.createDoc({ ...args, author: author(args.author) })),
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args);
+      await workspace.assertCanWrite(actor);
+      return ok(await store.createDoc({ ...args, author: actor }));
+    },
   );
 
   server.registerTool(
     'nexplan_docs_update',
     {
       title: 'Update a document',
-      description:
-        'Update a document (content/status/title/type/tags). Bumps the version number and ' +
-        'records a version in git history. Use it to keep docs current as work evolves.',
+      description: 'Update a document (content/status/title/type/tags). Bumps the version number and records a version in git.',
       inputSchema: z.object({
         slug: z.string(),
         content: z.string().optional().describe('Replacement markdown content.'),
@@ -271,36 +312,33 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
         status: docStatus.optional(),
         tags: z.array(z.string()).optional(),
         author: z.string().optional(),
+        project: projectOpt,
       }),
     },
     async (args) => {
-      const { slug, author: aut, ...patch } = args;
-      return ok(await store.updateDoc(slug, patch, author(aut)));
+      const { store, actor } = await projectStore(workspace, args);
+      await workspace.assertCanWrite(actor);
+      const { slug, author: _a, project: _p, ...patch } = args;
+      return ok(await store.updateDoc(slug, patch as never, actor));
     },
   );
 
   server.registerTool(
     'nexplan_docs_history',
-    {
-      title: 'Document version history',
-      description: 'List the version history (git commits) of a document, newest first.',
-      inputSchema: z.object({ slug: z.string(), limit: z.number().int().positive().optional() }),
+    { title: 'Document version history', description: 'List the version history (git commits) of a document, newest first.', inputSchema: z.object({ slug: z.string(), limit: z.number().int().positive().optional(), project: projectOpt }) },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      return ok(await store.docHistory(args.slug, args.limit ?? 100));
     },
-    async (args) => ok(await store.docHistory(args.slug, args.limit ?? 100)),
   );
 
   server.registerTool(
     'nexplan_docs_diff',
-    {
-      title: 'Diff two document versions',
-      description: 'Show a git diff of a document between two commits (shas from history).',
-      inputSchema: z.object({
-        slug: z.string(),
-        shaA: z.string(),
-        shaB: z.string(),
-      }),
+    { title: 'Diff two document versions', description: 'Show a git diff of a document between two commits in a project.', inputSchema: z.object({ slug: z.string(), shaA: z.string(), shaB: z.string(), project: projectOpt }) },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      return ok(await store.docDiff(args.slug, args.shaA, args.shaB));
     },
-    async (args) => ok(await store.docDiff(args.slug, args.shaA, args.shaB)),
   );
 
   // ------------------------------------------------------------------- bugs
@@ -309,48 +347,40 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
     'nexplan_bug_add',
     {
       title: 'Add a bug',
-      description:
-        'Report a bug. Use this when you discover a defect automatically (failed tests, ' +
-        'lint errors, crashes). Include evidence such as stack traces/logs. Set `author` ' +
-        'for attribution; foundBy becomes agent automatically.',
+      description: 'Report a bug. Use this when you discover a defect automatically. Include evidence such as stack traces/logs.',
       inputSchema: z.object({
         title: z.string().min(1),
         description: z.string().optional(),
         severity: bugSeverities.optional(),
         evidence: z.string().optional().describe('Stack trace, log lines, repro steps.'),
         tags: z.array(z.string()).optional(),
-        workItem: z.string().nullish().describe('Optional linked work item id.'),
+        workItem: z.string().nullish(),
         assignee: z.string().nullish(),
         author: z.string().optional(),
+        project: projectOpt,
       }),
     },
-    async (args) => ok(await store.createBug({ ...args, author: author(args.author) })),
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args);
+      await workspace.assertCanWrite(actor);
+      return ok(await store.createBug({ ...args, author: actor }));
+    },
   );
 
   server.registerTool(
     'nexplan_bug_list',
-    {
-      title: 'List bugs',
-      description: 'List/filter bugs.',
-      inputSchema: z.object({
-        status: z.union([bugStatuses, z.array(bugStatuses)]).optional(),
-        severity: z.union([bugSeverities, z.array(bugSeverities)]).optional(),
-        assignee: z.string().optional(),
-        query: z.string().optional(),
-        limit: z.number().int().positive().optional(),
-      }),
+    { title: 'List bugs', description: 'List/filter bugs in a project.', inputSchema: z.object({ status: z.union([bugStatuses, z.array(bugStatuses)]).optional(), severity: z.union([bugSeverities, z.array(bugSeverities)]).optional(), assignee: z.string().optional(), query: z.string().optional(), limit: z.number().int().positive().optional(), project: projectOpt }) },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      return ok(await store.listBugs(args as never));
     },
-    async (args) => ok(await store.listBugs(args)),
   );
 
   server.registerTool(
     'nexplan_bug_get',
-    {
-      title: 'Get a bug',
-      description: 'Fetch a single bug by id (e.g. BUG-1).',
-      inputSchema: z.object({ id: z.string() }),
-    },
+    { title: 'Get a bug', description: 'Fetch a single bug by id (e.g. BUG-1).', inputSchema: z.object({ id: z.string(), project: projectOpt }) },
     async (args) => {
+      const { store } = await projectStore(workspace, args);
       const bug = await store.getBug(args.id);
       if (!bug) throw new Error(`bug not found: ${args.id}`);
       return ok(bug);
@@ -359,21 +389,12 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
 
   server.registerTool(
     'nexplan_bug_update',
-    {
-      title: 'Update a bug',
-      description: 'Update a bug (status, severity, assignee, workItem).',
-      inputSchema: z.object({
-        id: z.string(),
-        status: bugStatuses.optional(),
-        severity: bugSeverities.optional(),
-        assignee: z.string().nullish(),
-        workItem: z.string().nullish(),
-        author: z.string().optional(),
-      }),
-    },
+    { title: 'Update a bug', description: 'Update a bug (status, severity, assignee, workItem).', inputSchema: z.object({ id: z.string(), status: bugStatuses.optional(), severity: bugSeverities.optional(), assignee: z.string().nullish(), workItem: z.string().nullish(), author: z.string().optional(), project: projectOpt }) },
     async (args) => {
-      const { id, author: aut, ...patch } = args;
-      return ok(await store.updateBug(id, patch, author(aut)));
+      const { store, actor } = await projectStore(workspace, args);
+      await workspace.assertCanWrite(actor);
+      const { id, author: _a, project: _p, ...patch } = args;
+      return ok(await store.updateBug(id, patch as never, actor));
     },
   );
 
@@ -381,48 +402,92 @@ export function registerNexplanTools(server: McpServer, store: Store): void {
 
   server.registerTool(
     'nexplan_status',
-    {
-      title: 'Project status',
-      description: 'Summary counts by status and recent activity across the board.',
-      inputSchema: z.object({}),
-    },
-    async () => ok(await store.boardSummary()),
+    { title: 'Project status', description: 'Summary counts by status and recent activity for a project.', inputSchema: z.object({ project: projectOpt }) },
+    async (args) => ok(await workspace.summary(args.project as string | undefined)),
   );
 
   server.registerTool(
     'nexplan_agent_next',
     {
       title: 'Suggest next item',
-      description:
-        'Suggest the next item for an agent to pick up: the top open critical/major bug ' +
-        'if any, otherwise the highest-priority unowned backlog item.',
-      inputSchema: z.object({ assignee: z.string().optional().describe('Your agent name.') }),
+      description: 'Suggest the next item for an agent: the top open critical/major bug if any, otherwise the highest-priority unowned backlog item.',
+      inputSchema: z.object({ assignee: z.string().optional(), project: projectOpt }),
     },
     async (args) => {
+      const { store } = await projectStore(workspace, args);
       const assignee = args.assignee ?? 'agent';
       const bugs = await store.listBugs({ status: ['open', 'in_progress', 'reopened'] });
-      const critical = bugs
-        .filter((b) => b.severity === 'critical' || b.severity === 'major')
-        .sort(bySeverity);
-      if (critical.length > 0) {
-        return ok({ recommendation: 'bug', bug: critical[0], reason: 'an open critical/major bug needs attention' });
-      }
+      const critical = bugs.filter((b) => b.severity === 'critical' || b.severity === 'major').sort(bySeverity);
+      if (critical.length > 0) return ok({ recommendation: 'bug', bug: critical[0], reason: 'an open critical/major bug needs attention' });
       const items = await store.listWorkItems({ status: ['backlog', 'todo'] });
-      const candidates = items
-        .filter((i) => i.status !== 'done' && i.status !== 'in_progress')
-        .sort((a, b) => prioRank(a.priority) - prioRank(b.priority));
-      if (candidates.length > 0) {
-        return ok({
-          recommendation: 'workitem',
-          item: candidates[0],
-          reason: 'highest-priority open backlog item',
-        });
-      }
-      const openBugs = bugs.sort(bySeverity);
-      if (openBugs.length > 0) {
-        return ok({ recommendation: 'bug', bug: openBugs[0], reason: 'no open backlog; report to next open bug' });
-      }
+      const candidates = items.filter((i) => i.status !== 'done' && i.status !== 'in_progress').sort((a, b) => prioRank(a.priority) - prioRank(b.priority));
+      if (candidates.length > 0) return ok({ recommendation: 'workitem', item: candidates[0], reason: 'highest-priority open backlog item' });
+      if (bugs.length > 0) return ok({ recommendation: 'bug', bug: bugs.sort(bySeverity)[0], reason: 'no open backlog; report to next open bug' });
       return ok({ recommendation: 'none', reason: 'no open work remains' });
+    },
+  );
+
+  // ------------------------------------------- multi-user / multi-project
+
+  server.registerTool(
+    'nexplan_project_list',
+    { title: 'List projects', description: 'List projects in the workspace.', inputSchema: z.object({}) },
+    async () => ok(await workspace.listProjects()),
+  );
+
+  server.registerTool(
+    'nexplan_project_create',
+    {
+      title: 'Create a project',
+      description: 'Create a new project with its own backlog, bugs and docs.',
+      inputSchema: z.object({
+        key: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/).describe('Unique project key, e.g. api.'),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        author: z.string().optional(),
+      }),
+    },
+    async (args) => {
+      await workspace.assertCanWrite(args.author ?? 'agent');
+      return ok(await workspace.createProject({ key: args.key, name: args.name, description: args.description }));
+    },
+  );
+
+  server.registerTool(
+    'nexplan_project_set_default',
+    { title: 'Set the default project', description: 'Set the workspace default project used when a call omits `project`.', inputSchema: z.object({ key: z.string(), author: z.string().optional() }) },
+    async (args) => {
+      await workspace.assertCanWrite(args.author ?? 'agent');
+      await workspace.setDefaultProject(args.key);
+      return ok({ ok: true, defaultProject: args.key });
+    },
+  );
+
+  server.registerTool(
+    'nexplan_user_list',
+    { title: 'List users', description: 'List registered users (humans + agents).', inputSchema: z.object({}) },
+    async () => ok(await workspace.listUsers()),
+  );
+
+  server.registerTool(
+    'nexplan_user_add',
+    {
+      title: 'Add a user',
+      description: 'Register a user (human or agent) with a role: admin | member | viewer.',
+      inputSchema: z.object({ id: z.string(), name: z.string().optional(), kind: userKinds.optional(), role: userRoles.optional(), author: z.string().optional() }),
+    },
+    async (args) => {
+      await workspace.assertCanWrite(args.author ?? 'agent');
+      return ok(await workspace.createUser({ id: args.id, name: args.name, kind: args.kind, role: args.role }));
+    },
+  );
+
+  server.registerTool(
+    'nexplan_user_update',
+    { title: 'Update a user', description: 'Change a user\'s name, kind or role.', inputSchema: z.object({ id: z.string(), name: z.string().optional(), kind: userKinds.optional(), role: userRoles.optional(), author: z.string().optional() }) },
+    async (args) => {
+      await workspace.assertCanWrite(args.author ?? 'agent');
+      return ok(await workspace.updateUser(args.id, { name: args.name, kind: args.kind, role: args.role }));
     },
   );
 }

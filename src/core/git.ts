@@ -17,7 +17,7 @@ export class Git {
     this.cwd = cwd;
   }
 
-  private async run(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  private async runInternal(args: string[]): Promise<{ stdout: string; stderr: string }> {
     try {
       const { stdout, stderr } = await execFileAsync('git', args, { cwd: this.cwd });
       return { stdout: stdout.trim(), stderr: stderr.trim() };
@@ -26,6 +26,11 @@ export class Git {
       const msg = e?.stderr || e?.message || String(err);
       throw new Error(`git ${args.join(' ')} failed: ${msg}`);
     }
+  }
+
+  /** Run a git command in the repo (used by higher-level managers). */
+  async run(args: string[]): Promise<{ stdout: string; stderr: string }> {
+    return this.runInternal(args);
   }
 
   async isRepo(): Promise<boolean> {
@@ -63,12 +68,22 @@ export class Git {
     await this.run(['add', '--', ...safe]);
   }
 
-  /** Add all changes in the repo (for the audit commit after file writes). */
+  /** Add all changes, scoped to the current working directory (the repo subtree
+   * rooted at this Git instance's cwd). In a mono-repo workspace this keeps each
+   * project's commit isolated from sibling projects. */
   async addAll(): Promise<void> {
-    await this.run(['add', '-A']);
+    await this.run(['add', '-A', '--', '.']);
   }
 
   async commit(message: string): Promise<GitCommitInfo | null> {
+    // Skip committing when the index has no staged changes (avoids noisy
+    // "nothing to commit" failures on operations that mutate nothing).
+    try {
+      await this.run(['diff', '--cached', '--quiet']);
+      return null; // exit 0 → nothing staged
+    } catch {
+      // exit 1 → staged changes exist; proceed to commit
+    }
     await this.run(['commit', '-q', '-m', message]);
     const sha = await this.latestSha();
     return { sha, author: await this.currentAuthor(), date: new Date().toISOString(), message };
@@ -118,15 +133,18 @@ export class Git {
     }
   }
 
-  /** Recent commits across the whole repo (for the board activity feed). */
-  async logAll(limit = 20): Promise<GitCommitInfo[]> {
+  /** Recent commits within a pathspec (default: the whole worktree). Pass `'.'`
+   * to scope to the cwd subtree, so a project's feed stays isolated. */
+  async logAll(limit = 20, pathspec?: string): Promise<GitCommitInfo[]> {
     try {
-      const { stdout } = await this.run([
+      const args = [
         'log',
         `--format=%H%x1f%an%x1f%aI%x1f%s`,
-        `-n`,
+        '-n',
         String(limit),
-      ]);
+      ];
+      if (pathspec) args.push('--', pathspec);
+      const { stdout } = await this.run(args);
       const rows = stdout.split('\n').filter(Boolean);
       return rows.map((row) => {
         const [sha, author, date, ...rest] = row.split('\x1f');
@@ -137,10 +155,18 @@ export class Git {
     }
   }
 
+  /** Repo-root-relative form of a path that's relative to this Git instance's cwd. */
+  async relToRoot(p: string): Promise<string> {
+    const { stdout } = await this.run(['rev-parse', '--show-prefix']);
+    const prefix = stdout.trim();
+    return prefix ? `${prefix}${p}` : p;
+  }
+
   /** Full content of a path at a commit (or working tree if sha omitted). */
   async showFile(path: string, sha?: string): Promise<string | null> {
     try {
-      const args = sha ? ['show', `${sha}:${path}`] : ['show', `HEAD:${path}`];
+      const rel = await this.relToRoot(path);
+      const args = sha ? ['show', `${sha}:${rel}`] : ['show', `HEAD:${rel}`];
       const { stdout } = await this.run(args);
       return stdout;
     } catch {

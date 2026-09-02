@@ -1,31 +1,45 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { Store } from '../core/store.js';
+import { Workspace } from '../core/workspace.js';
 import { getBoardRoot } from '../core/paths.js';
 import { BugFilter, ListFilter } from '../core/types.js';
 import { formatBug, formatBugFull, formatDoc, formatWorkItem, formatWorkItemFull } from './format.js';
 
-async function openStore(): Promise<Store> {
-  const store = new Store({ root: getBoardRoot(), agentName: process.env.NEXPLAN_AGENT || 'user', autoCommit: true });
-  await store.init();
-  return store;
-}
-
 const program = new Command();
 program
   .name('nexplan')
-  .description('NexPlan — git-backed project management hub for coding agents.')
-  .version('0.1.0')
-  .option('--root <path>', 'Board directory (default: $NEXPLAN_BOARD or ./.nexplan)')
+  .description('NexPlan — git-backed, multi-project project management hub for coding agents.')
+  .version('0.2.0')
+  .option('--root <path>', 'Workspace dir (default: $NEXPLAN_BOARD or ./.nexplan)')
+  .option('--project <key>', 'Project key (default: $NEXPLAN_PROJECT or the workspace default)')
   .option('--json', 'JSON output');
 
 function root(): string {
   return program.opts().root || getBoardRoot();
 }
 
-function store(): Promise<Store> {
-  const s = new Store({ root: root(), agentName: process.env.NEXPLAN_AGENT || 'user', autoCommit: true });
-  return s.init().then(() => s);
+// A shared Workspace (cached) so CLI operations share the same store instances
+// and user/project registries for the duration of one process.
+let _workspace: Workspace | null = null;
+async function workspace(): Promise<Workspace> {
+  if (!_workspace) {
+    _workspace = new Workspace({ root: root(), agentName: process.env.NEXPLAN_AGENT || 'user', autoCommit: true });
+    await _workspace.init();
+  }
+  return _workspace;
+}
+
+// Resolve the project key for board operations.
+async function projectKey(): Promise<string> {
+  const ws = await workspace();
+  return ws.resolveProject(program.opts().project || process.env.NEXPLAN_PROJECT);
+}
+
+// A Store scoped to the selected project.
+async function store(): Promise<Store> {
+  const ws = await workspace();
+  return ws.getStore(await projectKey());
 }
 
 function printJson(data: unknown): void {
@@ -360,17 +374,128 @@ docs
 
 program
   .command('status')
-  .description('Show board summary.')
+  .description('Show a project board summary.')
   .action(async () => {
-    const s = await (await store()).boardSummary();
+    const ws = await workspace();
+    const key = await projectKey();
+    const s = await ws.summary(key);
     if (program.opts().json) return printJson(s);
-    process.stdout.write(`work items: ${s.totalWorkItems}\n`);
-    for (const [k, v] of Object.entries(s.workItems)) process.stdout.write(`  ${k}: ${v}\n`);
-    process.stdout.write(`bugs: ${s.totalBugs}\n`);
-    for (const [k, v] of Object.entries(s.bugs)) process.stdout.write(`  ${k}: ${v}\n`);
-    process.stdout.write(`docs: ${s.docs}\n`);
-    process.stdout.write('\nrecent activity:\n');
-    for (const r of s.recent) process.stdout.write(`  ${formatDate(r.at)}  ${r.author}  ${r.action}\n`);
+    out(`project: ${key}\n`);
+    out(`work items: ${s.totalWorkItems}\n`);
+    for (const [k, v] of Object.entries(s.workItems)) out(`  ${k}: ${v}\n`);
+    out(`bugs: ${s.totalBugs}\n`);
+    for (const [k, v] of Object.entries(s.bugs)) out(`  ${k}: ${v}\n`);
+    out(`docs: ${s.docs}\n`);
+    out('\nrecent activity:\n');
+    for (const r of s.recent) out(`  ${formatDate(r.at)}  ${r.author}  ${r.action}\n`);
+  });
+
+// ---- projects & users ---------------------------------------------------------
+
+const projectCmd = program.command('project').description('Project management.');
+
+projectCmd
+  .command('list')
+  .alias('ls')
+  .description('List projects in the workspace.')
+  .action(async () => {
+    const projects = await (await workspace()).listProjects();
+    if (program.opts().json) return printJson(projects);
+    const def = await (await workspace()).getDefaultProjectKey();
+    for (const p of projects) out(`${p.key}  ${p.name}${p.key === def ? '  (default)' : ''}  ${p.members.length ? `[${p.members.join(',')}]` : ''}  ${p.description}\n`);
+  });
+
+projectCmd
+  .command('new <key>')
+  .description('Create a new project.')
+  .option('--name <name>', 'Display name.')
+  .option('--description <text>', 'Description.')
+  .option('--members <ids>', 'Comma-separated user ids.')
+  .action(async (key: string, opts: Record<string, string>) => {
+    const p = await (await workspace()).createProject({ key, name: opts.name, description: opts.description, members: split(opts.members) });
+    if (program.opts().json) return printJson(p);
+    out(`created project ${p.key} — ${p.name}\n`);
+  });
+
+projectCmd
+  .command('use <key>')
+  .description('Set the default project.')
+  .action(async (key: string) => {
+    await (await workspace()).setDefaultProject(key);
+    out(`default project → ${key}\n`);
+  });
+
+projectCmd
+  .command('show <key>')
+  .description('Show a project.')
+  .action(async (key: string) => {
+    const p = await (await workspace()).getProject(key);
+    if (!p) throw new Error(`project not found: ${key}`);
+    if (program.opts().json) return printJson(p);
+    out(`${p.key} — ${p.name}\n`);
+    out(`description: ${p.description || '-'}\n`);
+    out(`members: ${p.members.join(', ') || '-'}\n`);
+    out(`created: ${p.createdAt}\nupdated: ${p.updatedAt}\n`);
+  });
+
+projectCmd
+  .command('rm <key>')
+  .description('Delete a project (cannot delete the default).')
+  .action(async (key: string) => {
+    await (await workspace()).deleteProject(key);
+    out(`deleted project ${key}\n`);
+  });
+
+const userCmd = program.command('user').description('User management.');
+
+userCmd
+  .command('list')
+  .alias('ls')
+  .description('List registered users.')
+  .action(async () => {
+    const users = await (await workspace()).listUsers();
+    if (program.opts().json) return printJson(users);
+    for (const u of users) out(`${u.id}  ${u.name}  ${u.kind}  ${u.role}\n`);
+  });
+
+userCmd
+  .command('add <id>')
+  .description('Register a user (human or agent).')
+  .option('--name <name>', 'Display name.')
+  .option('--kind <kind>', 'human | agent.')
+  .option('--role <role>', 'admin | member | viewer.', 'member')
+  .action(async (id: string, opts: Record<string, string>) => {
+    const u = await (await workspace()).createUser({ id, name: opts.name, kind: opts.kind as never, role: opts.role as never });
+    if (program.opts().json) return printJson(u);
+    out(`added user ${u.id} (${u.role})\n`);
+  });
+
+userCmd
+  .command('role <id> <role>')
+  .description('Set a user role (admin | member | viewer).')
+  .action(async (id: string, role: string) => {
+    const u = await (await workspace()).updateUser(id, { role: role as never });
+    if (program.opts().json) return printJson(u);
+    out(`${u.id} → ${u.role}\n`);
+  });
+
+userCmd
+  .command('rm <id>')
+  .description('Remove a user.')
+  .action(async (id: string) => {
+    await (await workspace()).deleteUser(id);
+    out(`removed user ${id}\n`);
+  });
+
+const configCmd = program.command('config').description('Workspace configuration.');
+
+configCmd
+  .command('set-enforce-permissions <true|false>')
+  .description('Toggle strict permissions (registered users only, viewer is read-only).')
+  .action(async (v: string) => {
+    const bool = /^(true|1|yes)$/i.test(v);
+    await (await workspace()).setEnforcePermissions(bool);
+    out(`enforcePermissions=${bool}\n`);
   });
 
 program

@@ -10,12 +10,14 @@ NexPlan 通过 **Model Context Protocol** server（stdio）暴露完整的 backl
 command: node
 args:    ["<绝对路径>/nexplan/dist/mcp/server.js"]
 env:
-  NEXPLAN_BOARD:  /绝对路径/到/你的/.nexplan   # 必填 —— 数据所在
-  NEXPLAN_AGENT:  claude-code                   # 可选 —— 默认作者归属
+  NEXPLAN_BOARD:   /绝对路径/到/你的/.nexplan   # 必填 —— 数据所在
+  NEXPLAN_PROJECT: default                       # 可选 —— 活动项目 key
+  NEXPLAN_AGENT:   claude-code                   # 可选 —— 默认作者归属
 ```
 
 > 如果你全局安装了 CLI，也可以把 command 指向包的可执行文件。无论哪种方式，都要设置
-> `NEXPLAN_BOARD`，让每个 Agent 共享同一个看板。
+> `NEXPLAN_BOARD`，让每个 Agent 共享同一个工作区。多数工具接受可选的 `project` 参数，
+> 用来覆盖 `NEXPLAN_PROJECT`。
 
 ## 给 Agent 命名
 
@@ -28,7 +30,9 @@ env:
 
 省略时使用 `NEXPLAN_AGENT`（或 `agent`）。
 
-## 20 个工具
+## 26 个工具
+
+多数工具接受可选的 `project` 参数（默认取 `NEXPLAN_PROJECT` 或工作区默认项目）。
 
 | 工具 | 用途 |
 |---|---|
@@ -47,6 +51,8 @@ env:
 | `nexplan_bug_list` / `nexplan_bug_get` / `nexplan_bug_update` | 跟踪缺陷 |
 | `nexplan_status` | 看板汇总 + 近期活动 |
 | `nexplan_agent_next` | 建议下一个要处理的事项 |
+| `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | 项目管理 |
+| `nexplan_user_list` / `nexplan_user_add` / `nexplan_user_update` | 用户与角色管理 |
 
 ## 各 Agent 配置
 

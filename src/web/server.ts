@@ -3,12 +3,13 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../core/store.js';
+import { Workspace } from '../core/workspace.js';
 import { BugFilter, ListFilter } from '../core/types.js';
 
 export interface WebServerOptions {
   port?: number;
   host?: string;
-  root?: string; // board root
+  root?: string; // workspace root
 }
 
 async function findPackageRoot(): Promise<string> {
@@ -28,8 +29,19 @@ async function findPackageRoot(): Promise<string> {
 
 export async function startWebServer(opts: WebServerOptions = {}): Promise<void> {
   const boardRoot = opts.root || process.env.NEXPLAN_BOARD || path.join(process.cwd(), '.nexplan');
-  const store = new Store({ root: boardRoot, agentName: process.env.NEXPLAN_AGENT || 'user', autoCommit: true });
-  await store.init();
+  const workspace = new Workspace({
+    root: boardRoot,
+    agentName: process.env.NEXPLAN_AGENT || 'user',
+    autoCommit: true,
+  });
+  await workspace.init();
+
+  // Resolve the project store for a request. `?project=<key>` overrides
+  // $NEXPLAN_PROJECT, which overrides the workspace default.
+  async function storeFor(req: Request): Promise<Store> {
+    const key = await workspace.resolveProject((req.query.project as string) || process.env.NEXPLAN_PROJECT);
+    return workspace.getStore(key);
+  }
 
   const app = express();
   app.use(express.json({ limit: '2mb' }));
@@ -37,10 +49,113 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   const publicDir = path.join(pkgRoot, 'public');
   app.use(express.static(publicDir));
 
-  // ------------------------------------------------------------ work items
-  app.get('/api/board', async (_req, res, next) => {
+  // ------------------------------------------------------------ workspace
+  app.get('/api/workspace', async (_req, res, next) => {
     try {
-      res.json(await store.boardSummary());
+      const cfg = await workspace.getConfig();
+      const projects = await workspace.listProjects();
+      const users = await workspace.listUsers();
+      const current = await workspace.resolveProject();
+      res.json({ ...cfg, currentProject: current, projects, users });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/workspace/default-project', async (req, res, next) => {
+    try {
+      await workspace.setDefaultProject(req.body.key);
+      res.json({ ok: true, defaultProject: req.body.key });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/workspace/enforce-permissions', async (req, res, next) => {
+    try {
+      await workspace.setEnforcePermissions(Boolean(req.body.value));
+      res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // ------------------------------------------------------------ projects
+  app.get('/api/projects', async (_req, res, next) => {
+    try {
+      res.json(await workspace.listProjects());
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/projects', async (req, res, next) => {
+    try {
+      const { key, name, description, members } = req.body;
+      res.status(201).json(await workspace.createProject({ key, name, description, members }));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.patch('/api/projects/:key', async (req, res, next) => {
+    try {
+      const { name, description, members } = req.body;
+      res.json(await workspace.updateProject(req.params.key, { name, description, members }));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.delete('/api/projects/:key', async (req, res, next) => {
+    try {
+      await workspace.deleteProject(req.params.key);
+      res.json({ ok: true, key: req.params.key });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // ------------------------------------------------------------ users
+  app.get('/api/users', async (_req, res, next) => {
+    try {
+      res.json(await workspace.listUsers());
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/users', async (req, res, next) => {
+    try {
+      const { id, name, kind, role } = req.body;
+      res.status(201).json(await workspace.createUser({ id, name, kind, role }));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.patch('/api/users/:id', async (req, res, next) => {
+    try {
+      const { name, kind, role } = req.body;
+      res.json(await workspace.updateUser(req.params.id, { name, kind, role }));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.delete('/api/users/:id', async (req, res, next) => {
+    try {
+      await workspace.deleteUser(req.params.id);
+      res.json({ ok: true, id: req.params.id });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // ------------------------------------------------------------ work items
+  app.get('/api/board', async (req, res, next) => {
+    try {
+      res.json(await workspace.summary(req.query.project as string | undefined));
     } catch (e) {
       next(e);
     }
@@ -48,6 +163,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.get('/api/workitems', async (req, res, next) => {
     try {
+      const store = await storeFor(req);
       const { status, type, priority, assignee, tags, query, limit } = req.query;
       const items = await store.listWorkItems({
         status: status ? String(status).split(',') : undefined,
@@ -66,7 +182,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.get('/api/workitems/:id', async (req, res, next) => {
     try {
-      const item = await store.getWorkItem(req.params.id);
+      const item = await (await storeFor(req)).getWorkItem(req.params.id);
       if (!item) return res.status(404).json({ error: 'work item not found' });
       res.json(item);
     } catch (e) {
@@ -76,6 +192,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workitems', async (req, res, next) => {
     try {
+      const store = await storeFor(req);
       const items = Array.isArray(req.body) ? req.body : [req.body];
       const created = [];
       for (const it of items) created.push(await store.createWorkItem({ ...it, author: it.author ?? 'user' }));
@@ -88,7 +205,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.patch('/api/workitems/:id', async (req, res, next) => {
     try {
       const { author, ...patch } = req.body;
-      res.json(await store.updateWorkItem(req.params.id, patch, author ?? 'user'));
+      res.json(await (await storeFor(req)).updateWorkItem(req.params.id, patch, author ?? 'user'));
     } catch (e) {
       next(e);
     }
@@ -97,7 +214,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.post('/api/workitems/:id/claim', async (req, res, next) => {
     try {
       const { assignee, status, author } = req.body;
-      res.json(await store.claimWorkItem(req.params.id, assignee || 'user', status ?? 'in_progress', author ?? 'user'));
+      res.json(await (await storeFor(req)).claimWorkItem(req.params.id, assignee || 'user', status ?? 'in_progress', author ?? 'user'));
     } catch (e) {
       next(e);
     }
@@ -106,7 +223,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.post('/api/workitems/:id/complete', async (req, res, next) => {
     try {
       const { note, closeLinkedBugs, author } = req.body;
-      res.json(await store.completeWorkItem(req.params.id, { note, closeLinkedBugs, author: author ?? 'user' }));
+      res.json(await (await storeFor(req)).completeWorkItem(req.params.id, { note, closeLinkedBugs, author: author ?? 'user' }));
     } catch (e) {
       next(e);
     }
@@ -115,7 +232,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.post('/api/workitems/:id/note', async (req, res, next) => {
     try {
       const { body, author } = req.body;
-      res.json(await store.addWorkItemNote(req.params.id, body, author ?? 'user'));
+      res.json(await (await storeFor(req)).addWorkItemNote(req.params.id, body, author ?? 'user'));
     } catch (e) {
       next(e);
     }
@@ -124,7 +241,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.post('/api/workitems/:id/decompose', async (req, res, next) => {
     try {
       const { children, author } = req.body;
-      res.json(await store.decomposeWorkItem(req.params.id, children ?? [], author ?? 'user'));
+      res.json(await (await storeFor(req)).decomposeWorkItem(req.params.id, children ?? [], author ?? 'user'));
     } catch (e) {
       next(e);
     }
@@ -133,6 +250,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   // ------------------------------------------------------------------ bugs
   app.get('/api/bugs', async (req, res, next) => {
     try {
+      const store = await storeFor(req);
       const { status, severity, assignee, query, limit } = req.query;
       const bugs = await store.listBugs({
         status: status ? String(status).split(',') : undefined,
@@ -149,7 +267,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/bugs', async (req, res, next) => {
     try {
-      const b = await store.createBug({ ...req.body, author: req.body.author ?? 'user' });
+      const b = await (await storeFor(req)).createBug({ ...req.body, author: req.body.author ?? 'user' });
       res.status(201).json(b);
     } catch (e) {
       next(e);
@@ -159,16 +277,16 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.patch('/api/bugs/:id', async (req, res, next) => {
     try {
       const { author, ...patch } = req.body;
-      res.json(await store.updateBug(req.params.id, patch, author ?? 'user'));
+      res.json(await (await storeFor(req)).updateBug(req.params.id, patch, author ?? 'user'));
     } catch (e) {
       next(e);
     }
   });
 
   // ------------------------------------------------------------------ docs
-  app.get('/api/docs', async (_req, res, next) => {
+  app.get('/api/docs', async (req, res, next) => {
     try {
-      res.json(await store.listDocs());
+      res.json(await (await storeFor(req)).listDocs());
     } catch (e) {
       next(e);
     }
@@ -176,7 +294,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.get('/api/docs/:slug', async (req, res, next) => {
     try {
-      const doc = await store.getDoc(req.params.slug);
+      const doc = await (await storeFor(req)).getDoc(req.params.slug);
       if (!doc) return res.status(404).json({ error: 'doc not found' });
       res.json(doc);
     } catch (e) {
@@ -186,7 +304,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.get('/api/docs/:slug/history', async (req, res, next) => {
     try {
-      res.json(await store.docHistory(req.params.slug));
+      res.json(await (await storeFor(req)).docHistory(req.params.slug));
     } catch (e) {
       next(e);
     }
@@ -195,7 +313,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.get('/api/docs/:slug/diff', async (req, res, next) => {
     try {
       const { shaA, shaB } = req.query;
-      res.json({ diff: await store.docDiff(req.params.slug, String(shaA), String(shaB)) });
+      res.json({ diff: await (await storeFor(req)).docDiff(req.params.slug, String(shaA), String(shaB)) });
     } catch (e) {
       next(e);
     }
@@ -204,7 +322,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.post('/api/docs', async (req, res, next) => {
     try {
       const { author, ...input } = req.body;
-      res.status(201).json(await store.createDoc({ ...input, author: author ?? 'user' }));
+      res.status(201).json(await (await storeFor(req)).createDoc({ ...input, author: author ?? 'user' }));
     } catch (e) {
       next(e);
     }
@@ -213,7 +331,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.patch('/api/docs/:slug', async (req, res, next) => {
     try {
       const { author, ...patch } = req.body;
-      res.json(await store.updateDoc(req.params.slug, patch, author ?? 'user'));
+      res.json(await (await storeFor(req)).updateDoc(req.params.slug, patch, author ?? 'user'));
     } catch (e) {
       next(e);
     }
@@ -232,7 +350,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   const host = opts.host ?? process.env.HOST ?? '127.0.0.1';
   const server = app.listen(port, host, () => {
     process.stdout.write(`\n  NexPlan dashboard → http://${host}:${port}\n`);
-    process.stdout.write(`  board: ${boardRoot}\n\n`);
+    process.stdout.write(`  workspace: ${boardRoot}\n\n`);
   });
 
   const shutdown = () => server.close(() => process.exit(0));

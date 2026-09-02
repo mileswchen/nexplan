@@ -39,6 +39,7 @@ command: node
 args:    ["/abs/path/to/nexplan/dist/mcp/server.js"]
 env:
   NEXPLAN_BOARD:  /abs/path/to/your-project/.nexplan
+  NEXPLAN_PROJECT: default
   NEXPLAN_AGENT:  dsh
 ```
 

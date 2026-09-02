@@ -21,7 +21,7 @@ trail, diffs, conflict-safe parallel work, and real version history for free.
 It is exposed through **three interfaces** that all share the same store:
 
 1. **CLI** — `nexplan …` (humans, scripts).
-2. **MCP server** — `node dist/mcp/server.js` (agents; 20 `nexplan_*` tools).
+2. **MCP server** — `node dist/mcp/server.js` (agents; 26 `nexplan_*` tools).
 3. **Web dashboard** — `nexplan web` (humans; kanban board, bug tracker, doc viewer).
 
 ---
@@ -48,19 +48,23 @@ node dist/cli/index.js status
 
 ## 3. The board: where your data lives
 
-The **board** is a directory (a git repo) that holds everything. By default it is
-`./.nexplan` in the current working directory; set `NEXPLAN_BOARD` to relocate it.
+The **workspace** is a directory (a git repo) that holds one or more **projects**.
+By default it is `./.nexplan` in the current working directory; set `NEXPLAN_BOARD` to
+relocate it. Each project has its own backlog, bugs and docs.
 
 ```
-<board>/
-  nexplan.json        project metadata
-  workitems/          WI-*.json       backlog tasks
-  bugs/               BUG-*.json      bugs
-  docs/               <slug>.md       documents (markdown + frontmatter)
+<workspace>/
+  workspace.json        default project, project list, permission flags
+  users/<id>.json       user registry
+  projects/<key>/
+    project.json        project meta (name, description, members)
+    workitems/          WI-*.json       backlog tasks
+    bugs/               BUG-*.json      bugs
+    docs/               <slug>.md       documents (markdown + frontmatter)
 ```
 
-Every mutation runs `git add` + `git commit`, so `git log` is your full activity
-feed, and documents get real version history.
+Every mutation runs `git add` + `git commit` (scoped to the project subtree), so
+`git log` is your full activity feed, and documents get real version history.
 
 ### Statuses, types and priorities
 
@@ -164,6 +168,39 @@ nexplan docs history "下单设计"
 | `nexplan status` | Summary counts by status + recent activity. |
 | `nexplan web [--port n]` | Start the web dashboard (default port 3344). |
 
+### Multi-project
+
+`--project <key>` (or `NEXPLAN_PROJECT`) selects the active project for any board
+command; it defaults to the workspace's default project.
+
+| Command | Description |
+|---|---|
+| `nexplan project list` | List projects. |
+| `nexplan project new <key> [--name n] [--description d] [--members a,b]` | Create a project. |
+| `nexplan project use <key>` | Set the workspace default project. |
+| `nexplan project show <key>` | Show project details. |
+| `nexplan project rm <key>` | Delete a project (not the default). |
+
+### Multi-user
+
+| Command | Description |
+|---|---|
+| `nexplan user list` | List registered users. |
+| `nexplan user add <id> [--name n] [--kind human\|agent] [--role admin\|member\|viewer]` | Register a user. |
+| `nexplan user role <id> <admin\|member\|viewer>` | Change a user's role. |
+| `nexplan user rm <id>` | Remove a user. |
+| `nexplan config set-enforce-permissions <true\|false>` | Require registered users for writes; a `viewer` role is read-only. |
+
+Roles: `admin` (everything), `member` (write work/bugs/docs), `viewer` (read-only).
+With permissions **enforced**, writes require a registered non-viewer user.
+
+```bash
+nexplan project new backend --name "后端" --description "服务端"
+nexplan --project backend add "实现下单 API" --priority P0
+nexplan user add claude-code --kind agent --role member
+nexplan user list
+```
+
 ---
 
 ## 6. MCP server (for coding agents)
@@ -187,7 +224,10 @@ A cross-agent overview: [`docs/AGENTS.md`](AGENTS.md).
 > If an agent can’t load MCP servers, it can drive the exact same board by shelling
 > out to the `nexplan` CLI (Step 5).
 
-### The 20 tools
+### The 26 tools
+
+Most tools accept an optional `project` argument (defaults to `$NEXPLAN_PROJECT` or
+the workspace default).
 
 | Tool | Purpose |
 |---|---|
@@ -206,10 +246,13 @@ A cross-agent overview: [`docs/AGENTS.md`](AGENTS.md).
 | `nexplan_bug_list` / `nexplan_bug_get` / `nexplan_bug_update` | Track bugs |
 | `nexplan_status` | Board summary + recent activity |
 | `nexplan_agent_next` | Suggest the next item to pick up |
+| `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | Manage projects |
+| `nexplan_user_list` / `nexplan_user_add` / `nexplan_user_update` | Manage users (roles) |
 
-Every write tool accepts an **`author`** argument — set it to your agent name so the
-git history and dashboard attribute the change correctly. If omitted, `NEXPLAN_AGENT`
-(or `agent`) is used.
+Every write tool accepts an **`author`** argument and, where relevant, a
+**`project`** argument. Set `author` to your agent name so the git history and
+dashboard attribute the change correctly. If omitted, `NEXPLAN_AGENT` (or `agent`)
+is used; if a project is omitted, `NEXPLAN_PROJECT` (or the default) is used.
 
 ```jsonc
 // Example tool call: add a decomposed subtask
@@ -268,11 +311,12 @@ nexplan docs history "下单设计"            # version list for one doc
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `NEXPLAN_BOARD` | `./.nexplan` | Board (data) directory. Set the same path in every agent config so they share one board. |
+| `NEXPLAN_BOARD` | `./.nexplan` | Workspace (data) directory. Sets the same path in every agent config so they share one workspace. |
+| `NEXPLAN_PROJECT` | workspace default | Active project key for board operations. |
 | `NEXPLAN_AGENT` | `user` (CLI) / `agent` (MCP) | Default author attribution for writes. |
 | `PORT` / `HOST` | `3344` / `127.0.0.1` | Web dashboard bind. |
 
-CLI/JSON: `--root <path>` and `--json` modify behaviour for one invocation.
+CLI/JSON: `--root <path>`, `--project <key>` and `--json` modify behaviour for one invocation.
 
 ---
 

@@ -660,7 +660,9 @@ export class Store {
     if (!this.isGitActive()) {
       return this.recentFromFiles(limit);
     }
-    const commits = await this.git.logAll(limit);
+    // Scope the commit log to this board's subtree so a project's feed in a
+    // shared workspace repo does not include sibling projects' commits.
+    const commits = await this.git.logAll(limit, '.');
     const out: BoardActivity[] = [];
     for (const c of commits) {
       const kind = c.message.startsWith('bug:') ? 'bug' : c.message.startsWith('doc:') ? 'doc' : 'workitem';

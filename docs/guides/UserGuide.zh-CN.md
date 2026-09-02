@@ -20,7 +20,7 @@ NexPlan 是一个**基于 git 的项目管理中枢**，面向编码 Agent 与�
 它通过**三种接口**暴露，全部共享同一套存储：
 
 1. **CLI** —— `nexplan …`（人类、脚本）。
-2. **MCP server** —— `node dist/mcp/server.js`（Agent；20 个 `nexplan_*` 工具）。
+2. **MCP server** —— `node dist/mcp/server.js`（Agent；26 个 `nexplan_*` 工具）。
 3. **Web 看板** —— `nexplan web`（人类；看板、缺陷、文档）。
 
 ---
@@ -45,21 +45,24 @@ node dist/cli/index.js status
 
 ---
 
-## 3. 看板：你的数据放在哪里
+## 3. 工作区：你的数据放在哪里
 
-**看板**是一个目录（一个 git 仓库），存放所有数据。默认是当前工作目录下的
-`./.nexplan`；设置 `NEXPLAN_BOARD` 可改变位置。
+**工作区**是一个目录（一个 git 仓库），存放一个或多个**项目**。默认是当前工作目录下的
+`./.nexplan`；设置 `NEXPLAN_BOARD` 可改变位置。每个项目有自己的 backlog、缺陷与文档。
 
 ```
-<board>/
-  nexplan.json        项目元信息
-  workitems/          WI-*.json      待办任务
-  bugs/               BUG-*.json     缺陷
-  docs/               <slug>.md      文档（markdown + frontmatter）
+<workspace>/
+  workspace.json        默认项目、项目列表、权限开关
+  users/<id>.json       用户注册表
+  projects/<key>/
+    project.json        项目元信息（名称、描述、成员）
+    workitems/          WI-*.json      待办任务
+    bugs/               BUG-*.json     缺陷
+    docs/               <slug>.md      文档（markdown + frontmatter）
 ```
 
-每次变更都会执行 `git add` + `git commit`，所以 `git log` 就是完整的活动日志，
-文档也获得真正的版本历史。
+每次变更都会执行 `git add` + `git commit`（限定在项目子树内），所以 `git log` 就是
+完整的活动日志，文档也获得真正的版本历史。
 
 ### 状态、类型与优先级
 
@@ -162,6 +165,38 @@ nexplan docs history "下单设计"
 | `nexplan status` | 按状态汇总 + 近期活动。 |
 | `nexplan web [--port n]` | 启动 Web 看板（默认端口 3344）。 |
 
+### 多项目
+
+任意看板命令可通过 `--project <key>`（或 `NEXPLAN_PROJECT`）选择活动项目；默认取工作区默认项目。
+
+| 命令 | 说明 |
+|---|---|
+| `nexplan project list` | 列出项目。 |
+| `nexplan project new <key> [--name n] [--description d] [--members a,b]` | 创建项目。 |
+| `nexplan project use <key>` | 设置为默认项目。 |
+| `nexplan project show <key>` | 显示项目详情。 |
+| `nexplan project rm <key>` | 删除项目（不能删默认项目）。 |
+
+### 多用户
+
+| 命令 | 说明 |
+|---|---|
+| `nexplan user list` | 列出用户。 |
+| `nexplan user add <id> [--name n] [--kind human\|agent] [--role admin\|member\|viewer]` | 注册用户。 |
+| `nexplan user role <id> <admin\|member\|viewer>` | 改角色。 |
+| `nexplan user rm <id>` | 删除用户。 |
+| `nexplan config set-enforce-permissions <true\|false>` | 开启后仅限已注册用户写入；`viewer` 只读。 |
+
+角色：`admin`（全部）、`member`（可写工作项/缺陷/文档）、`viewer`（只读）。
+开启**权限校验**后，写入需要已注册的非 `viewer` 用户。
+
+```bash
+nexplan project new backend --name "后端" --description "服务端"
+nexplan --project backend add "实现下单 API" --priority P0
+nexplan user add claude-code --kind agent --role member
+nexplan user list
+```
+
 ---
 
 ## 6. MCP server（给 Coding Agent 用）
@@ -184,7 +219,9 @@ env:
 
 > 如果某个 Agent 无法加载 MCP server，它也可以直接 shell 调用 `nexplan` CLI（第 5 节）。
 
-### 20 个工具
+### 26 个工具
+
+多数工具都接受可选的 `project` 参数（默认取 `$NEXPLAN_PROJECT` 或工作区默认项目）。
 
 | 工具 | 用途 |
 |---|---|
@@ -203,13 +240,16 @@ env:
 | `nexplan_bug_list` / `nexplan_bug_get` / `nexplan_bug_update` | 跟踪缺陷 |
 | `nexplan_status` | 看板汇总 + 近期活动 |
 | `nexplan_agent_next` | 建议下一个要处理的事项 |
+| `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | 项目管理 |
+| `nexplan_user_list` / `nexplan_user_add` / `nexplan_user_update` | 用户与角色管理 |
 
-每个写工具都接受一个 **`author`** 参数 —— 填入你的 Agent 名字，好让 git 历史和看板正确
-归属变更。省略时使用 `NEXPLAN_AGENT`（或 `agent`）。
+每个写工具都接受一个 **`author`** 参数，涉及项目时还接受 **`project`** 参数。设置
+`author` 为你的 Agent 名，便于 git 历史和看板正确归属；省略时用 `NEXPLAN_AGENT`
+（或 `agent`），省略项目时用 `NEXPLAN_PROJECT`（或默认）。
 
 ```jsonc
-// 示例工具调用：录入一个分解子任务
-{ "items": [{ "title": "订单表结构", "type": "task", "priority": "P0" }], "author": "claude-code" }
+// 示例工具调用：在 api 项目录入一个分解子任务
+{ "items": [{ "title": "订单表结构", "type": "task", "priority": "P0" }], "author": "claude-code", "project": "api" }
 ```
 
 ---
@@ -261,11 +301,12 @@ nexplan docs history "下单设计"            # 单篇文档的版本列表
 
 | 变量 | 默认值 | 含义 |
 |---|---|---|
-| `NEXPLAN_BOARD` | `./.nexplan` | 看板（数据）目录。请在所有 Agent 配置里设为同一路径，让它们共享一个看板。 |
+| `NEXPLAN_BOARD` | `./.nexplan` | 工作区（数据）目录。请在所有 Agent 配置里设为同一路径，让它们共享一个工作区。 |
+| `NEXPLAN_PROJECT` | 工作区默认 | 看板操作的活动项目 key。 |
 | `NEXPLAN_AGENT` | `user`（CLI）/ `agent`（MCP） | 写入时的默认作者归属。 |
 | `PORT` / `HOST` | `3344` / `127.0.0.1` | Web 看板的绑定地址。 |
 
-CLI / JSON：`--root <path>` 与 `--json` 只改变单次调用的行为。
+CLI / JSON：`--root <path>`、`--project <key>` 与 `--json` 只改变单次调用的行为。
 
 ---
 

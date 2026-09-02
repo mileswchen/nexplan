@@ -9,7 +9,7 @@ block pointing at the NexPlan MCP server.
 [mcp_servers.nexplan]
 command = "node"
 args = ["/abs/path/to/nexplan/dist/mcp/server.js"]
-env = { NEXPLAN_BOARD = "/abs/path/to/your-project/.nexplan" }
+env = { NEXPLAN_BOARD = "/abs/path/to/your-project/.nexplan", NEXPLAN_PROJECT = "default" }
 ```
 
 Set `NEXPLAN_AGENT = "codex"` in the same `env` table (or pass `author: "codex"` on

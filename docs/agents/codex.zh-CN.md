@@ -9,7 +9,7 @@ Codex CLI 从 `~/.codex/config.toml` 读取 MCP server。加一个 `[mcp_servers
 [mcp_servers.nexplan]
 command = "node"
 args = ["/绝对路径/到/nexplan/dist/mcp/server.js"]
-env = { NEXPLAN_BOARD = "/绝对路径/到/你的项目/.nexplan" }
+env = { NEXPLAN_BOARD = "/绝对路径/到/你的项目/.nexplan", NEXPLAN_PROJECT = "default" }
 ```
 
 在同一张 `env` 表里设置 `NEXPLAN_AGENT = "codex"`（或在写工具里传 `author: "codex"`），

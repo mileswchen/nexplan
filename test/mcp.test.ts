@@ -5,7 +5,7 @@ import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { Store } from '../src/core/store.js';
+import { Workspace } from '../src/core/workspace.js';
 import { registerNexplanTools } from '../src/mcp/tools.js';
 
 let dir: string;
@@ -14,10 +14,10 @@ let server: McpServer;
 
 beforeEach(async () => {
   dir = await mkdtemp(path.join(tmpdir(), 'nexplan-mcp-'));
-  const store = new Store({ root: dir, agentName: 'mcp-agent', autoCommit: true });
-  await store.init();
-  server = new McpServer({ name: 'nexplan', version: '0.1.0' });
-  registerNexplanTools(server, store);
+  const workspace = new Workspace({ root: dir, agentName: 'mcp-agent', autoCommit: true });
+  await workspace.init();
+  server = new McpServer({ name: 'nexplan', version: '0.2.0' });
+  registerNexplanTools(server, workspace);
   const [clientT, serverT] = InMemoryTransport.createLinkedPair();
   client = new Client({ name: 'test-client', version: '1.0.0' });
   // Connect the server before the client: the in-memory transport queues the
@@ -47,7 +47,9 @@ describe('MCP server tools', () => {
     expect(names).toContain('nexplan_docs_update');
     expect(names).toContain('nexplan_bug_add');
     expect(names).toContain('nexplan_agent_next');
-    expect(names.length).toBeGreaterThanOrEqual(18);
+    expect(names).toContain('nexplan_project_create');
+    expect(names).toContain('nexplan_user_add');
+    expect(names.length).toBe(26);
   });
 
   it('adds a backlog item and lists it', async () => {
@@ -113,5 +115,27 @@ describe('MCP server tools', () => {
     const b = (status.structuredContent as any);
     expect(b.totalWorkItems).toBe(1);
     expect(b.totalBugs).toBe(1);
+    expect(b.projectKey).toBe('default');
+  });
+
+  it('creates a project and isolates work within it', async () => {
+    await call('nexplan_project_create', { key: 'api', name: 'API' });
+    await call('nexplan_backlog_add', { items: [{ title: 'API task' }], project: 'api' });
+    const defaultList = await call('nexplan_backlog_list', {});
+    const apiList = await call('nexplan_backlog_list', { project: 'api' });
+    expect((defaultList.structuredContent as any).items).toHaveLength(0);
+    expect((apiList.structuredContent as any).items).toHaveLength(1);
+    expect((apiList.structuredContent as any).items[0].title).toBe('API task');
+    const projects = await call('nexplan_project_list', {});
+    expect((projects.structuredContent as any).items.map((p: any) => p.key)).toEqual(['default', 'api']);
+  });
+
+  it('manages users through MCP', async () => {
+    await call('nexplan_user_add', { id: 'claude-code', kind: 'agent', role: 'member' });
+    const users = await call('nexplan_user_list', {});
+    const list = (users.structuredContent as any).items;
+    expect(list).toHaveLength(1);
+    expect(list[0].id).toBe('claude-code');
+    expect(list[0].kind).toBe('agent');
   });
 });

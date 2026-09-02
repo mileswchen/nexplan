@@ -16,10 +16,13 @@
     background: var(--bg); color: var(--text); font-size: 14px; }
   a { color: var(--accent); text-decoration: none; }
   .muted { color: var(--muted); }
-  .top { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border);
+  .top { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--border);
     background: var(--panel); position: sticky; top: 0; z-index: 20; flex-wrap: wrap; }
   .brand { font-weight: 700; font-size: 18px; letter-spacing: .3px; }
   .brand span { color: var(--accent); }
+  .proj { display: flex; align-items: center; gap: 6px; }
+  .proj select { background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 10px; border-radius: 8px; font-size: 13px; }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; }
   .chip { background: var(--panel2); border: 1px solid var(--border); border-radius: 999px;
     padding: 4px 10px; font-size: 12px; }
@@ -64,6 +67,7 @@
   .st.blocked,.st.wontfix { color: var(--red); }
   .assignee { color: var(--magenta); font-size: 12px; }
   .tag { color: var(--muted); font-size: 12px; }
+  .role-admin { color: var(--red); } .role-member { color: var(--cyan); } .role-viewer { color: var(--muted); }
   .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
   .toolbar input, .toolbar select { background: var(--panel2); border: 1px solid var(--border); color: var(--text);
     padding: 6px 10px; border-radius: 8px; font-size: 13px; }
@@ -78,7 +82,7 @@
   .doc-body { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 14px;
     white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.55;
     min-height: 240px; }
-  textarea, input[type=text] { width: 100%; background: var(--panel2); border: 1px solid var(--border);
+  textarea, input[type=text], select { width: 100%; background: var(--panel2); border: 1px solid var(--border);
     color: var(--text); padding: 8px 10px; border-radius: 8px; font-family: inherit; font-size: 13px; }
   textarea { min-height: 120px; font-family: ui-monospace, Menlo, monospace; }
   label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 12px; }
@@ -97,16 +101,21 @@
   .hidden { display: none !important; }
   .diff { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
     white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  table.admin { width: 100%; border-collapse: collapse; }
+  table.admin th, table.admin td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  table.admin th { color: var(--muted); font-weight: 600; font-size: 12px; }
 </style>
 </head>
 <body>
 <div class="top">
   <div class="brand">Nex<span>Plan</span></div>
+  <div class="proj"><span class="muted">项目</span><select id="project-select"></select></div>
   <div class="chips" id="chips"></div>
   <div class="tabs">
     <button class="tab active" data-tab="board">待办板</button>
     <button class="tab" data-tab="bugs">缺陷</button>
     <button class="tab" data-tab="docs">文档</button>
+    <button class="tab" data-tab="admin">管理</button>
   </div>
   <button class="btn" id="refresh">刷新</button>
 </div>
@@ -149,6 +158,22 @@
       <div class="panel" id="doc-view"><div class="empty">在左侧选择一个文档</div></div>
     </div>
   </section>
+
+  <!-- ADMIN -->
+  <section id="view-admin" class="hidden">
+    <div class="grid2">
+      <div class="panel">
+        <h2>项目</h2>
+        <button class="btn primary sm" id="new-project">+ 新建项目</button>
+        <table class="admin" style="margin-top:10px" id="project-table"></table>
+      </div>
+      <div class="panel">
+        <h2>用户</h2>
+        <button class="btn primary sm" id="new-user">+ 添加用户</button>
+        <table class="admin" style="margin-top:10px" id="user-table"></table>
+      </div>
+    </div>
+  </section>
 </main>
 
 <!-- work item modal -->
@@ -158,6 +183,9 @@
 
 <script>
 const $ = (s) => document.querySelector(s);
+const esc = (s) => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let project = 'default';
+const withProject = (u) => u + (u.includes('?') ? '&' : '?') + 'project=' + encodeURIComponent(project);
 const api = {
   get: (u) => fetch(u).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
   send: (u, method, body) => fetch(u, { method, headers: {'Content-Type':'application/json'},
@@ -167,10 +195,18 @@ let board = {};
 const STATUSES = ['backlog','todo','in_progress','review','done','blocked'];
 const STATUS_LABEL = { backlog:'待办', todo:'待开始', in_progress:'进行中', review:'评审中', done:'完成', blocked:'阻塞' };
 const STATUS_ORDER = ['open','in_progress','fixed','verified','wontfix','reopened'];
-const esc = (s) => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function initProjects() {
+  const w = await api.get('/api/workspace');
+  const sel = $('#project-select');
+  sel.innerHTML = w.projects.map(p => `<option value="${esc(p.key)}" ${p.key===w.currentProject?'selected':''}>${esc(p.name)} (${esc(p.key)})</option>`).join('');
+  project = w.currentProject || (w.projects[0] && w.projects[0].key) || 'default';
+  sel.value = project;
+  sel.onchange = () => { project = sel.value; refresh(); };
+}
 
 async function loadSummary() {
-  board = await api.get('/api/board');
+  board = await api.get('/api/board?project=' + encodeURIComponent(project));
   const keys = Object.entries(board.workItems);
   const wTotal = keys.reduce((a,[k,v]) => a+v, 0);
   const bTotal = board.bugs ? Object.values(board.bugs).reduce((a,v)=>a+v,0) : 0;
@@ -185,14 +221,13 @@ async function loadBoard() {
   const q = $('#q').value.trim();
   const pri = $('#filter-priority').value;
   const asg = $('#filter-assignee').value;
-  const params = new URLSearchParams();
+  const params = new URLSearchParams({ project });
   if (q) params.set('query', q);
   if (pri) params.set('priority', pri);
   if (asg) params.set('assignee', asg);
   const items = await api.get('/api/workitems?' + params.toString());
   const byStatus = {};
   for (const s of STATUSES) byStatus[s] = items.filter(i => i.status === s);
-  // build assignee filter options
   const assignees = [...new Set(items.map(i => i.assignee).filter(Boolean))];
   $('#filter-assignee').innerHTML = '<option value="">全部负责人</option>' +
     assignees.map(a => `<option value="${esc(a)}">@${esc(a)}</option>`).join('');
@@ -223,7 +258,7 @@ function bindCards() {
 }
 
 async function openItem(id) {
-  const i = await api.get('/api/workitems/' + id);
+  const i = await api.get('/api/workitems/' + id + '?project=' + encodeURIComponent(project));
   const modal = $('#modal');
   modal.innerHTML = `
     <h3>${esc(i.id)} · ${esc(i.title)}</h3>
@@ -246,29 +281,25 @@ async function openItem(id) {
       <input type="text" id="note-input" placeholder="添加备注…" />
       <button class="btn" id="note-add">添加</button>
     </div>
-    <div class="row" style="margin-top:16px">
-      <button class="btn" id="w-close">关闭</button>
-      <div class="spacer" style="flex:1"></div>
-      <button class="btn danger" id="w-delete-hint" style="display:none"></button>
-    </div>`;
+    <div class="row" style="margin-top:16px"><button class="btn" id="w-close">关闭</button></div>`;
   $('.modal-bg').classList.add('open');
   $('#w-status').onchange = async (e) => {
-    const r = await api.send('/api/workitems/' + id, 'PATCH', { status: e.target.value, author: 'user' });
+    await api.send('/api/workitems/' + id + '?project=' + encodeURIComponent(project), 'PATCH', { status: e.target.value, author: 'user' });
     await refresh();
   };
   $('#w-claim').onclick = async () => {
     const asg = prompt('认领人（agent 或 user）：','user');
-    if (asg) { await api.send(`/api/workitems/${id}/claim`, 'POST', { assignee: asg }); await refresh(); }
+    if (asg) { await api.send(`/api/workitems/${id}/claim?project=${encodeURIComponent(project)}`, 'POST', { assignee: asg }); await refresh(); }
   };
   $('#w-complete').onclick = async () => {
     const note = prompt('完成备注：','');
-    await api.send(`/api/workitems/${id}/complete`, 'POST', { note: note || '', author: 'user' });
+    await api.send(`/api/workitems/${id}/complete?project=${encodeURIComponent(project)}`, 'POST', { note: note || '', author: 'user' });
     await refresh();
   };
   $('#note-add').onclick = async () => {
     const v = $('#note-input').value.trim();
     if (!v) return;
-    await api.send(`/api/workitems/${id}/note`, 'POST', { body: v, author: 'user' });
+    await api.send(`/api/workitems/${id}/note?project=${encodeURIComponent(project)}`, 'POST', { body: v, author: 'user' });
     await openItem(id); await refresh();
   };
   $('#w-close').onclick = closeModal;
@@ -281,6 +312,7 @@ async function refresh() {
   if (!$('#view-board').classList.contains('hidden')) await loadBoard();
   if (!$('#view-bugs').classList.contains('hidden')) await loadBugs();
   if (!$('#view-docs').classList.contains('hidden')) await loadDocsList();
+  if (!$('#view-admin').classList.contains('hidden')) await loadAdmin();
 }
 
 // ---------------- bugs ----------------
@@ -288,7 +320,7 @@ async function loadBugs() {
   const q = $('#bq').value.trim();
   const sev = $('#b-severity').value;
   const st = $('#b-status').value;
-  const params = new URLSearchParams();
+  const params = new URLSearchParams({ project });
   if (q) params.set('query', q);
   if (sev) params.set('severity', sev);
   if (st) params.set('status', st);
@@ -309,7 +341,7 @@ async function loadBugs() {
   document.querySelectorAll('[data-fix]').forEach(btn => {
     btn.onclick = async (e) => {
       e.stopPropagation();
-      await api.send('/api/bugs/' + btn.dataset.fix, 'PATCH', { status: 'fixed', author: 'user' });
+      await api.send('/api/bugs/' + btn.dataset.fix + '?project=' + encodeURIComponent(project), 'PATCH', { status: 'fixed', author: 'user' });
       await refresh();
     };
   });
@@ -319,8 +351,8 @@ async function loadBugs() {
 }
 
 async function openBug(id) {
-  const i = await api.get('/api/bugs');
-  const b = i.find(x => x.id === id);
+  const list = await api.get('/api/bugs?project=' + encodeURIComponent(project));
+  const b = list.find(x => x.id === id);
   if (!b) return;
   const modal = $('#modal');
   modal.innerHTML = `
@@ -339,16 +371,14 @@ async function openBug(id) {
   $('.modal-bg').classList.add('open');
   $('#b-close').onclick = closeModal;
   $('#b-save').onclick = async () => {
-    await api.send('/api/bugs/' + id, 'PATCH', { severity: $('#b-sev').value, status: $('#b-st').value, author: 'user' });
+    await api.send('/api/bugs/' + id + '?project=' + encodeURIComponent(project), 'PATCH', { severity: $('#b-sev').value, status: $('#b-st').value, author: 'user' });
     closeModal(); await refresh();
   };
 }
 
 // ---------------- docs ----------------
-let docSlugs = [];
 async function loadDocsList() {
-  const docs = await api.get('/api/docs');
-  docSlugs = docs.map(d => d.slug);
+  const docs = await api.get('/api/docs?project=' + encodeURIComponent(project));
   $('#doc-list').innerHTML = docs.map(d => `
     <div class="list-item" data-slug="${esc(d.slug)}">${esc(d.slug)} <span class="muted">v${d.meta.version}</span>
       <span class="st">${d.meta.status}</span> <span class="muted">[${d.meta.type}]</span>
@@ -360,8 +390,9 @@ async function loadDocsList() {
 
 async function openDoc(slug) {
   const s = encodeURIComponent(slug);
-  const d = await api.get('/api/docs/' + s);
-  const hist = await api.get('/api/docs/' + s + '/history');
+  const q = 'project=' + encodeURIComponent(project);
+  const d = await api.get('/api/docs/' + s + '?' + q);
+  const hist = await api.get('/api/docs/' + s + '/history?' + q);
   $('#doc-view').innerHTML = `
     <div class="row">
       <h2 style="margin:0">${esc(d.meta.title)}</h2>
@@ -377,7 +408,7 @@ async function openDoc(slug) {
     <div class="doc-body" style="min-height:auto">${hist.map(v => `v${v.version} · ${v.sha.slice(0,8)} · ${esc(v.author)} · ${esc(new Date(v.date).toLocaleString())}<br>${esc(v.message)}`).join('<br><br>') || '暂无版本'}</div>`;
   $('#doc-edit').onclick = () => editDoc(slug, d.content);
   $('#doc-status').onclick = async () => {
-    await api.send('/api/docs/' + s, 'PATCH', { status: 'approved', author: 'user' });
+    await api.send('/api/docs/' + s + '?' + q, 'PATCH', { status: 'approved', author: 'user' });
     await openDoc(slug); await refresh();
   };
 }
@@ -393,15 +424,51 @@ function editDoc(slug, content) {
   $('.modal-bg').classList.add('open');
   $('#doc-cancel').onclick = closeModal;
   $('#doc-save').onclick = async () => {
-    await api.send('/api/docs/' + encodeURIComponent(slug), 'PATCH', { content: $('#doc-body').value, author: 'user' });
+    await api.send('/api/docs/' + encodeURIComponent(slug) + '?project=' + encodeURIComponent(project), 'PATCH', { content: $('#doc-body').value, author: 'user' });
     closeModal(); await openDoc(slug); await refresh();
   };
 }
 
+// ---------------- admin (projects & users) ----------------
+async function loadAdmin() {
+  const w = await api.get('/api/workspace');
+  const projects = w.projects, users = w.users;
+  $('#project-table').innerHTML = `<tr><th>Key</th><th>名称</th><th>成员</th><th></th></tr>` +
+    projects.map(p => `<tr>
+      <td>${esc(p.key)}${p.key===w.currentProject ? ' <span class="st">default</span>' : ''}</td>
+      <td>${esc(p.name)}</td><td>${esc((p.members||[]).join(', '))||'-'}</td>
+      <td style="white-space:nowrap">
+        ${p.key!=='default' ? `<button class="btn sm" data-del-proj="${esc(p.key)}">删除</button>` : ''}
+        ${p.key!==w.currentProject ? `<button class="btn sm" data-use-proj="${esc(p.key)}">设为默认</button>` : ''}
+      </td></tr>`).join('');
+  document.querySelectorAll('[data-del-proj]').forEach(b => b.onclick = async () => {
+    if (confirm('删除项目 ' + b.dataset.delProj + ' ？')) { await api.send('/api/projects/' + encodeURIComponent(b.dataset.delProj), 'DELETE'); await refresh(); }
+  });
+  document.querySelectorAll('[data-use-proj]').forEach(b => b.onclick = async () => {
+    await api.send('/api/workspace/default-project', 'POST', { key: b.dataset.useProj });
+    await initProjects(); await refresh();
+  });
+
+  $('#user-table').innerHTML = `<tr><th>ID</th><th>名称</th><th>类型</th><th>角色</th><th></th></tr>` +
+    users.map(u => `<tr>
+      <td>${esc(u.id)}</td><td>${esc(u.name)}</td><td>${u.kind}</td>
+      <td><select class="role" data-user="${esc(u.id)}">${['admin','member','viewer'].map(r => `<option ${r===u.role?'selected':''}>${r}</option>`).join('')}</select></td>
+      <td><button class="btn sm danger" data-del-user="${esc(u.id)}">删除</button></td></tr>`).join('');
+  document.querySelectorAll('.role').forEach(sel => sel.onchange = async () => {
+    await api.send('/api/users/' + encodeURIComponent(sel.dataset.user), 'PATCH', { role: sel.value });
+    await loadAdmin();
+  });
+  document.querySelectorAll('[data-del-user]').forEach(b => b.onclick = async () => {
+    if (confirm('删除用户 ' + b.dataset.delUser + ' ？')) { await api.send('/api/users/' + encodeURIComponent(b.dataset.delUser), 'DELETE'); await loadAdmin(); }
+  });
+}
+
 // ---------------- new forms ----------------
+function modalShell(html) { const m = $('#modal'); m.innerHTML = html; $('.modal-bg').classList.add('open'); }
+function closeModalX() { $('.modal-bg').classList.remove('open'); }
+
 function newItemForm() {
-  const modal = $('#modal');
-  modal.innerHTML = `
+  modalShell(`
     <h3>新建待办</h3>
     <label>标题</label><input type="text" id="n-title" />
     <label>类型</label><select id="n-type">${['task','feature','refactor','chore','research','docs'].map(t=>`<option>${t}</option>`).join('')}</select>
@@ -409,21 +476,19 @@ function newItemForm() {
       <div style="flex:1"><label>标签（逗号分隔）</label><input type="text" id="n-tags" /></div></div>
     <label>描述</label><textarea id="n-desc"></textarea>
     <div class="row" style="margin-top:12px"><button class="btn" id="n-cancel">取消</button>
-      <button class="btn primary" id="n-save">创建</button></div>`;
-  $('.modal-bg').classList.add('open');
-  $('#n-cancel').onclick = closeModal;
+      <button class="btn primary" id="n-save">创建</button></div>`);
+  $('#n-cancel').onclick = closeModalX;
   $('#n-save').onclick = async () => {
     const title = $('#n-title').value.trim();
     if (!title) return alert('请输入标题');
-    await api.send('/api/workitems', 'POST', { title, type: $('#n-type').value, priority: $('#n-pri').value,
+    await api.send('/api/workitems?project=' + encodeURIComponent(project), 'POST', { title, type: $('#n-type').value, priority: $('#n-pri').value,
       tags: $('#n-tags').value.split(',').map(t=>t.trim()).filter(Boolean), description: $('#n-desc').value, author: 'user' });
-    closeModal(); await refresh();
+    closeModalX(); await refresh();
   };
 }
 
 function newBugForm() {
-  const modal = $('#modal');
-  modal.innerHTML = `
+  modalShell(`
     <h3>录入缺陷</h3>
     <label>标题</label><input type="text" id="b-title" />
     <div class="row"><div style="flex:1"><label>级别</label><select id="b-sev">${['critical','major','minor','trivial'].map(s=>`<option>${s}</option>`).join('')}</select></div>
@@ -431,47 +496,76 @@ function newBugForm() {
     <label>证据（堆栈/日志）</label><textarea id="b-evidence"></textarea>
     <label>描述</label><textarea id="b-desc"></textarea>
     <div class="row" style="margin-top:12px"><button class="btn" id="b-cancel">取消</button>
-      <button class="btn primary" id="b-save">创建</button></div>`;
-  $('.modal-bg').classList.add('open');
-  $('#b-cancel').onclick = closeModal;
+      <button class="btn primary" id="b-save">创建</button></div>`);
+  $('#b-cancel').onclick = closeModalX;
   $('#b-save').onclick = async () => {
     const title = $('#b-title').value.trim();
     if (!title) return alert('请输入标题');
-    await api.send('/api/bugs', 'POST', { title, severity: $('#b-sev').value,
+    await api.send('/api/bugs?project=' + encodeURIComponent(project), 'POST', { title, severity: $('#b-sev').value,
       evidence: $('#b-evidence').value, description: $('#b-desc').value,
       tags: $('#b-tags').value.split(',').map(t=>t.trim()).filter(Boolean), author: 'user' });
-    closeModal(); await refresh();
+    closeModalX(); await refresh();
   };
 }
 
 function newDocForm() {
-  const modal = $('#modal');
-  modal.innerHTML = `
+  modalShell(`
     <h3>新建文档</h3>
     <label>标题</label><input type="text" id="d-title" />
     <div class="row"><div style="flex:1"><label>类型</label><select id="d-type">${['design','decision','adr','architecture','notes'].map(t=>`<option>${t}</option>`).join('')}</select></div>
       <div style="flex:1"><label>标签</label><input type="text" id="d-tags" /></div></div>
     <label>Markdown 内容</label><textarea id="d-body"></textarea>
     <div class="row" style="margin-top:12px"><button class="btn" id="d-cancel">取消</button>
-      <button class="btn primary" id="d-save">创建</button></div>`;
-  $('.modal-bg').classList.add('open');
-  $('#d-cancel').onclick = closeModal;
+      <button class="btn primary" id="d-save">创建</button></div>`);
+  $('#d-cancel').onclick = closeModalX;
   $('#d-save').onclick = async () => {
     const title = $('#d-title').value.trim();
     if (!title) return alert('请输入标题');
-    const d = await api.send('/api/docs', 'POST', { title, type: $('#d-type').value,
+    const d = await api.send('/api/docs?project=' + encodeURIComponent(project), 'POST', { title, type: $('#d-type').value,
       tags: $('#d-tags').value.split(',').map(t=>t.trim()).filter(Boolean), body: $('#d-body').value, author: 'user' });
-    closeModal();
-    await showTab('docs'); await refresh(); await openDoc(d.slug);
+    closeModalX(); await showTab('docs'); await refresh(); await openDoc(d.slug);
+  };
+}
+
+function newProjectForm() {
+  modalShell(`
+    <h3>新建项目</h3>
+    <label>Key（如 api）</label><input type="text" id="p-key" />
+    <label>名称</label><input type="text" id="p-name" />
+    <label>描述</label><input type="text" id="p-desc" />
+    <div class="row" style="margin-top:12px"><button class="btn" id="p-cancel">取消</button>
+      <button class="btn primary" id="p-save">创建</button></div>`);
+  $('#p-cancel').onclick = closeModalX;
+  $('#p-save').onclick = async () => {
+    const key = $('#p-key').value.trim();
+    if (!key) return alert('请输入 key');
+    await api.send('/api/projects', 'POST', { key, name: $('#p-name').value || key, description: $('#p-desc').value });
+    closeModalX(); await initProjects(); await showTab('admin'); await loadAdmin();
+  };
+}
+
+function newUserForm() {
+  modalShell(`
+    <h3>添加用户</h3>
+    <label>ID（如 claude-code）</label><input type="text" id="u-id" />
+    <label>名称</label><input type="text" id="u-name" />
+    <div class="row"><div style="flex:1"><label>类型</label><select id="u-kind">${['human','agent'].map(k=>`<option>${k}</option>`).join('')}</select></div>
+      <div style="flex:1"><label>角色</label><select id="u-role">${['admin','member','viewer'].map(r=>`<option>${r}</option>`).join('')}</select></div></div>
+    <div class="row" style="margin-top:12px"><button class="btn" id="u-cancel">取消</button>
+      <button class="btn primary" id="u-save">添加</button></div>`);
+  $('#u-cancel').onclick = closeModalX;
+  $('#u-save').onclick = async () => {
+    const id = $('#u-id').value.trim();
+    if (!id) return alert('请输入 ID');
+    await api.send('/api/users', 'POST', { id, name: $('#u-name').value || id, kind: $('#u-kind').value, role: $('#u-role').value });
+    closeModalX(); await loadAdmin();
   };
 }
 
 // ---------------- wiring ----------------
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-  $('#view-board').classList.toggle('hidden', name !== 'board');
-  $('#view-bugs').classList.toggle('hidden', name !== 'bugs');
-  $('#view-docs').classList.toggle('hidden', name !== 'docs');
+  ['board','bugs','docs','admin'].forEach(v => $('#view-' + v).classList.toggle('hidden', name !== v));
   refresh();
 }
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
@@ -479,6 +573,8 @@ $('#refresh').onclick = refresh;
 $('#new-item').onclick = newItemForm;
 $('#new-bug').onclick = newBugForm;
 $('#new-doc').onclick = newDocForm;
+$('#new-project').onclick = newProjectForm;
+$('#new-user').onclick = newUserForm;
 $('#modal-bg').onclick = (e) => { if (e.target === e.currentTarget) closeModal(); };
 $('#q').oninput = debounce(loadBoard, 300);
 $('#bq').oninput = debounce(loadBugs, 300);
@@ -489,7 +585,7 @@ $('#b-status').onchange = loadBugs;
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
-refresh();
+initProjects().then(refresh);
 setInterval(() => { if (!document.hidden) refresh(); }, 15000);
 </script>
 </body>

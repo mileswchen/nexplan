@@ -1,7 +1,8 @@
 # NexPlan — Command Cheat Sheet / 命令速查表
 
-单页速查。任何命令加 `--json` 输出 JSON；`--root <path>` 覆盖看板目录。
-Add `--json` for JSON output; `--root <path>` overrides the board directory.
+单页速查。任何命令加 `--json` 输出 JSON；`--root <path>` 覆盖工作区目录；
+`--project <key>` 选择项目。
+Add `--json` for JSON output; `--root <path>` overrides the workspace; `--project <key>` selects a project.
 
 ## 安装 / Install
 
@@ -15,7 +16,8 @@ node dist/cli/index.js …          # run without installing
 
 | 变量 | 默认 | 含义 |
 |---|---|---|
-| `NEXPLAN_BOARD` | `./.nexplan` | 看板目录（所有 Agent 一致）|
+| `NEXPLAN_BOARD` | `./.nexplan` | 工作区目录（所有 Agent 一致）|
+| `NEXPLAN_PROJECT` | 工作区默认 | 活动项目 key |
 | `NEXPLAN_AGENT` | `user`/`agent` | 默认作者 |
 | `PORT` / `HOST` | `3344` / `127.0.0.1` | Web 绑定 |
 
@@ -27,6 +29,9 @@ nexplan add "重构认证" --type refactor --priority P1 --manual   # 录入 bac
 nexplan list --status backlog                                    # 查看
 nexplan claim WI-1 --assignee claude-code                        # 认领
 nexplan done WI-1 --note "完成"                                  # 标记完成
+nexplan project new api --name "API"                             # 新建项目
+nexplan --project api add "订单接口" --priority P0               # 在 api 项目录入
+nexplan user add claude-code --kind agent --role member          # 注册用户
 nexplan web                                                      # 打开看板
 ```
 
@@ -70,16 +75,25 @@ nexplan status           # 汇总 + 近期活动
 nexplan web [--port n]   # Web 看板（默认 3344）
 ```
 
+## 项目与用户 / Projects & users
+
+| 命令 | 说明 |
+|---|---|
+| `nexplan project list` / `new <key> [--name n]` / `use <key>` / `show <key>` / `rm <key>` | 项目管理 |
+| `nexplan user list` / `add <id> [--kind human\|agent] [--role r]` / `role <id> <admin\|member\|viewer>` / `rm <id>` | 用户与角色 |
+| `nexplan config set-enforce-permissions <true\|false>` | 仅限已注册用户写入；`viewer` 只读 |
+
 ## MCP（给 Agent）/ For agents
 
 ```
 command: node
 args:    ["/abs/path/nexplan/dist/mcp/server.js"]
-env:     { NEXPLAN_BOARD: "...", NEXPLAN_AGENT: "<agent>" }
+env:     { NEXPLAN_BOARD: "...", NEXPLAN_PROJECT: "<key>", NEXPLAN_AGENT: "<agent>" }
 ```
 
-20 个 `nexplan_*` 工具：`backlog_add/list/get/claim/update/complete/decompose/note`、
-`docs_list/get/create/update/history/diff`、`bug_add/list/get/update`、`status`、`agent_next`。
+26 个 `nexplan_*` 工具：`backlog_add/list/get/claim/update/complete/decompose/note`、
+`docs_list/get/create/update/history/diff`、`bug_add/list/get/update`、`status`、`agent_next`、
+`project_list/create/set_default`、`user_list/add/update`。多数工具接受可选 `project` 与 `author` 参数。
 
 ## 状态枚举 / Enums
 

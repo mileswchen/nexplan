@@ -13,7 +13,8 @@ server。把 NexPlan 注册成 local MCP server。
       "type": "local",
       "command": ["node", "/绝对路径/到/nexplan/dist/mcp/server.js"],
       "environment": {
-        "NEXPLAN_BOARD": "/绝对路径/到/你的项目/.nexplan"
+        "NEXPLAN_BOARD": "/绝对路径/到/你的项目/.nexplan",
+        "NEXPLAN_PROJECT": "default"
       },
       "enabled": true
     }

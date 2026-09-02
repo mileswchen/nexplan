@@ -13,6 +13,7 @@ the repo) or from your user config. Point it at the NexPlan MCP server.
       "args": ["/abs/path/to/nexplan/dist/mcp/server.js"],
       "env": {
         "NEXPLAN_BOARD": "/abs/path/to/your-project/.nexplan",
+        "NEXPLAN_PROJECT": "default",
         "NEXPLAN_AGENT": "claude-code"
       }
     }

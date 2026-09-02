@@ -17,12 +17,14 @@ trail, diffs, conflict-safe parallel work, and real version history for document
 | **Agent 取 item，做完自动更新状态** | `nexplan_backlog_claim` → `nexplan_backlog_complete` |
 | **设计与决策文档（版本管理）** | MCP `nexplan_docs_create/update/history/diff`；每个更新产生 git 版本 |
 | **手动录入 bug + Agent 自动发现的 bug** | `nexplan_bug_add/list/update`；完成关联 item 时自动 `fixed` |
+| **多项目管理** | 一个工作区可承载多个项目，各自独立的 backlog / 缺陷 / 文档；`--project` / `?project=` / MCP `project` 参数选择 |
+| **多用户管理** | 用户注册表（人类 + Agent）带角色 `admin / member / viewer`；`viewer` 只读，可强制校验 |
 
 ## Quick start
 
 ```bash
 cd <your project>
-# 1. Reset the board to this project (defaults to ./.nexplan)
+# 1. Point the workspace at this project (defaults to ./.nexplan)
 export NEXPLAN_BOARD="$PWD/.nexplan"
 
 # 2. Build (or use the CLI via the package)
@@ -35,11 +37,18 @@ nexplan add "重构认证模块" --type refactor --priority P1 --tags auth
 nexplan list --status backlog
 nexplan status
 
-# 4. Agent interface (MCP) — see docs/AGENTS.md for per-agent config
+# 4. Projects & users
+nexplan project new api --name "API 重写" --description Backend
+nexplan --project api add "订单接口" --priority P0
+nexplan user add claude-code --kind agent --role member
+nexplan user list
+
+# 5. Agent interface (MCP) — see docs/AGENTS.md for per-agent config
 ```
 
 > `NEXPLAN_AGENT` names the agent that authored writes (defaults to `user`). If you
 > leave it unset when an agent writes, the `author` tool argument is used.
+> `NEXPLAN_PROJECT` (or `--project`) selects the active project.
 
 ## Installing the CLI
 
@@ -52,24 +61,27 @@ node dist/cli/index.js list
 ## The three interfaces
 
 - **CLI** (`nexplan …`) — humans and scripting.
-- **MCP server** (`node dist/mcp/server.js`) — agents. Exposes 20 `nexplan_*` tools.
-- **Web dashboard** (`nexplan web`) — humans: kanban board, bug tracker, doc viewer/history.
+- **MCP server** (`node dist/mcp/server.js`) — agents. Exposes 26 `nexplan_*` tools.
+- **Web dashboard** (`nexplan web`) — humans: kanban board, bug tracker, doc viewer/history, and a projects/users admin panel.
 
-All three share the same git-backed `Store`, so they are fully consistent.
+All three share the same git-backed workspace + `Store`, so they are fully consistent.
 
 ## Where the data lives
 
 ```
-<board>/
-  nexplan.json        project meta
-  workitems/          WI-*.json  (backlog tasks)
-  bugs/               BUG-*.json
-  docs/               <slug>.md  (markdown + frontmatter metadata)
+<workspace>/                       (NEXPLAN_BOARD, a single git repo)
+  workspace.json                   default project, project list, permission flags
+  users/<id>.json                  user registry (role, kind)
+  projects/<key>/                  one board per project
+    project.json                   project meta (name, description, members)
+    workitems/  WI-*.json          backlog tasks
+    bugs/       BUG-*.json
+    docs/       <slug>.md          documents (markdown + frontmatter)
 ```
 
-Every mutation is `git add` + `git commit`, so `git log` is your full activity feed.
-Documents additionally embed a `version` counter in frontmatter; document history and
-diffs come straight from git.
+Every mutation is `git add` + `git commit` (scoped to the project subtree), so
+`git log` is your full activity feed. Documents additionally embed a `version`
+counter in frontmatter; document history and diffs come straight from git.
 
 ## Requirements
 
@@ -87,22 +99,40 @@ npm run dev:web      # run the web server from source
 
 ## CLI reference
 
+Global options: `--root <path>` (workspace dir), `--project <key>`, `--json`.
+
 ```
-nexplan add "<title>" [--type t] [--priority P] [--description d] [--tags a,b] [--assignee name] [--manual] [--json-input]
-nexplan list [--status s] [--priority p] [--assignee name] [--query q] [--limit n]
-nexplan get <id>
-nexplan claim <id> --assignee name
-nexplan update <id> [--status s] [--title t] [--priority p] ...
-nexplan done <id> [--note n] [--no-close-bugs]
-nexplan decompose <parentId> --child "subtask A" --child "subtask B"
-nexplan note <id> <body>
-nexplan bug add "<title>" [--severity s] [--evidence e] [--manual]
-nexplan bug list [--status s] [--severity s] [--query q]
-nexplan bug get <id>
-nexplan bug update <id> [--status s] [--severity s] [--assignee name]
-nexplan docs list | docs show <slug> | docs new <title> | docs update <slug> [--content c] | docs history <slug> | docs diff <slug> <shaA> <shaB>
-nexplan status
+nexplan add "<title>" [--type t] [--priority P] [--description d] [--tags a,b] [--assignee name] [--manual] [--json-input] [--project key]
+nexplan list [--status s] [--priority p] [--assignee name] [--query q] [--limit n] [--project key]
+nexplan get <id> [--project key]
+nexplan claim <id> --assignee name [--project key]
+nexplan update <id> [--status s] [--title t] [--priority p] ... [--project key]
+nexplan done <id> [--note n] [--no-close-bugs] [--project key]
+nexplan decompose <parentId> --child "subtask A" [--project key]
+nexplan note <id> <body> [--project key]
+nexplan bug add "<title>" [--severity s] [--evidence e] [--manual] [--project key]
+nexplan bug list [--status s] [--severity s] [--query q] [--project key]
+nexplan bug get <id> [--project key]
+nexplan bug update <id> [--status s] [--severity s] [--assignee name] [--project key]
+nexplan docs list | docs show <slug> | docs new <title> | docs update <slug> | docs history <slug> | docs diff <slug> <shaA> <shaB>   [--project key]
+nexplan status [--project key]
 nexplan web [--port n]
+
+# Multi-project
+nexplan project list
+nexplan project new <key> [--name n] [--description d] [--members a,b]
+nexplan project use <key>      # set default project
+nexplan project show <key>
+nexplan project rm <key>
+
+# Multi-user
+nexplan user list
+nexplan user add <id> [--name n] [--kind human|agent] [--role admin|member|viewer]
+nexplan user role <id> <admin|member|viewer>
+nexplan user rm <id>
+
+# Workspace
+nexplan config set-enforce-permissions <true|false>
 ```
 
 Add `--json` to any command for JSON output.

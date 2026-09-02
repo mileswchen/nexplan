@@ -13,7 +13,8 @@ OpenCode loads MCP servers from `opencode.json` in the project (or
       "type": "local",
       "command": ["node", "/abs/path/to/nexplan/dist/mcp/server.js"],
       "environment": {
-        "NEXPLAN_BOARD": "/abs/path/to/your-project/.nexplan"
+        "NEXPLAN_BOARD": "/abs/path/to/your-project/.nexplan",
+        "NEXPLAN_PROJECT": "default"
       },
       "enabled": true
     }

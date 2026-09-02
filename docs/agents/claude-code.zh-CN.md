@@ -13,6 +13,7 @@ Claude Code 从项目级 `.mcp.json`（推荐，随仓库提交）或用户配�
       "args": ["/绝对路径/到/nexplan/dist/mcp/server.js"],
       "env": {
         "NEXPLAN_BOARD": "/绝对路径/到/你的项目/.nexplan",
+        "NEXPLAN_PROJECT": "default",
         "NEXPLAN_AGENT": "claude-code"
       }
     }
