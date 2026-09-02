@@ -197,6 +197,26 @@ nexplan user add claude-code --kind agent --role member
 nexplan user list
 ```
 
+### 访问控制与 Agent 配置广播
+
+权限分两层：
+
+1. **项目成员名单（始终生效）** —— 列出了 `members` 的项目仅限成员 + admin 访问（读写都算）；
+   名单为空 = 公开。
+2. **严格模式**（`nexplan config set-enforce-permissions true`）—— 额外要求已注册用户，
+   并让 `admin` 成为唯一能管理工作区的角色；`viewer` 只读。
+
+把 Agent 限定到某个项目并生成它的 MCP 配置：
+
+```bash
+nexplan user add claude-code --kind agent --role member
+nexplan project new backend --members claude-code
+nexplan agent config claude-code --project backend   # 打印 MCP 配置 + 权限说明
+```
+
+`agent config` 会输出一段可直接粘贴的 MCP 配置（带 `NEXPLAN_PROJECT` + `NEXPLAN_AGENT`），
+让每个 Agent 都被正确限定与归属。授权方式：把该 Agent 加入项目成员，或授予 `admin` 角色。
+
 ---
 
 ## 6. MCP server（给 Coding Agent 用）
@@ -265,6 +285,10 @@ env:
   点击某项可编辑级别 / 状态。
 - **文档** —— 左侧文档列表；选中后在右侧查看正文、元信息与**版本历史**。**编辑（生成新版本）**
   会作为新版本更新；**新建文档** 创建文档。
+
+顶部栏的**项目切换器**可切换活动项目。**管理**标签页新增**项目统计**面板（各项目的
+待办/缺陷/文档数量，点卡片直接进入），以及项目与用户管理（新建/删除项目、设默认、改角色、
+加用户、严格权限开关）。
 
 看板每 15 秒自动刷新，并在每次操作后刷新。
 

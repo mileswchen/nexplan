@@ -377,6 +377,65 @@ export class Workspace {
     if (user?.role === 'viewer') throw new Error(`user ${user.id} is read-only (viewer)`);
   }
 
+  /** Workspace management (projects, users, config) requires the `admin` role in
+   * strict mode. When permissions are off, management is open to everyone. */
+  async assertAdmin(author?: string): Promise<void> {
+    const cfg = await this.loadConfig();
+    if (!cfg.enforcePermissions) return;
+    const role = await this.roleOf(author);
+    if (role !== 'admin') {
+      throw new Error(`admin role required to manage the workspace (current: ${role})`);
+    }
+  }
+
+  /**
+   * Project-level access control.
+   *
+   * - Roster gate (always active): a project that lists members restricts access
+   *   to those members plus admins. Projects with an empty roster stay open.
+   * - Strict gate (when `enforcePermissions`): the author must be a registered user
+   *   who is an admin or a project member.
+   * - Write gate (always active): `viewer` is read-only.
+   */
+  async assertProjectAccess(projectKey: string, author?: string, opts: { write?: boolean } = {}): Promise<void> {
+    const cfg = await this.loadConfig();
+    const role = await this.roleOf(author);
+    const project = await this.getProject(projectKey);
+    const members = project?.members ?? [];
+    const isAdmin = role === 'admin';
+    const isMember = author ? members.includes(author) : false;
+
+    if (members.length > 0 && !isAdmin && !isMember) {
+      throw new Error(`no access to project "${projectKey}": "${author || '?'}" is not a project member`);
+    }
+    if (cfg.enforcePermissions) {
+      if (!author) {
+        throw new Error('no author supplied for an enforced-permissions workspace');
+      }
+      const user = await this.getUser(author);
+      if (!user) {
+        throw new Error(`user not registered: ${author} (register with nexplan user add)`);
+      }
+      if (!isAdmin && !isMember) {
+        throw new Error(`no access to project "${projectKey}": "${author}" is not a member`);
+      }
+    }
+    if (opts.write && role === 'viewer') {
+      throw new Error(`user ${author} is read-only (viewer)`);
+    }
+  }
+
+  /** Per-project statistics for all projects (for admin dashboards). */
+  async projectsStats(): Promise<Array<Project & { summary: ProjectSummary }>> {
+    const projects = await this.listProjects();
+    const out: Array<Project & { summary: ProjectSummary }> = [];
+    for (const p of projects) {
+      const summary = { ...(await this.getStore(p.key).boardSummary()), projectKey: p.key } as ProjectSummary;
+      out.push({ ...p, summary });
+    }
+    return out;
+  }
+
   private validRole(v?: string): UserRole | undefined {
     return v && DEFAULT_USER_ROLES.includes(v as UserRole) ? (v as UserRole) : undefined;
   }

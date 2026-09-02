@@ -138,4 +138,19 @@ describe('MCP server tools', () => {
     expect(list[0].id).toBe('claude-code');
     expect(list[0].kind).toBe('agent');
   });
+
+  it('enforces a project member roster for board access', async () => {
+    await call('nexplan_user_add', { id: 'alice', kind: 'human', role: 'member' });
+    await call('nexplan_project_create', { key: 'team', name: 'Team', members: ['alice'], author: 'alice' });
+    // A project member can write.
+    const ok = await call('nexplan_backlog_add', { items: [{ title: 'ok' }], project: 'team', author: 'alice' });
+    expect(ok.isError).toBeFalsy();
+    expect((ok.structuredContent as any).created).toHaveLength(1);
+    // A non-member is denied on both reads and writes (SDK surfaces as isError).
+    const noWrite = await call('nexplan_backlog_add', { items: [{ title: 'no' }], project: 'team', author: 'bob' });
+    expect(noWrite.isError).toBeTruthy();
+    expect(noWrite.content[0].text).toMatch(/not a project member/);
+    const noRead = await call('nexplan_backlog_list', { project: 'team', author: 'bob' });
+    expect(noRead.isError).toBeTruthy();
+  });
 });

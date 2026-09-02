@@ -201,6 +201,28 @@ nexplan user add claude-code --kind agent --role member
 nexplan user list
 ```
 
+### Access control & per-agent config
+
+Permissions work in two layers:
+
+1. **Project member roster (always active)** — a project that lists `members` is
+   restricted to those members + admins (reads and writes). Empty roster = open.
+2. **Strict mode** (`nexplan config set-enforce-permissions true`) — additionally
+   requires registered users, makes `admin` the only role allowed to manage the
+   workspace, and makes `viewer` read-only.
+
+Scope an agent to a project and generate its MCP config:
+
+```bash
+nexplan user add claude-code --kind agent --role member
+nexplan project new backend --members claude-code
+nexplan agent config claude-code --project backend   # prints MCP config + access note
+```
+
+`agent config` emits a ready-to-paste MCP snippet (with `NEXPLAN_PROJECT` +
+`NEXPLAN_AGENT`) so each agent is scoped and correctly attributed. Grant access by
+adding the agent to a project's members or by giving it the `admin` role.
+
 ---
 
 ## 6. MCP server (for coding agents)
@@ -274,6 +296,11 @@ Run `nexplan web`, then open `http://127.0.0.1:3344`. It has three tabs:
 - **Docs** — a document list on the left; select one to view its content, metadata and
   **version history** on the right. **编辑（生成新版本）** updates it as a new version;
   **新建文档** creates one.
+
+The project selector in the header switches the active project. The **管理 (Admin)**
+tab adds a **project statistics** panel (work-item/bug/doc counts per project, click a
+card to open it) plus project and user management (create/delete projects, set the
+default, set roles, add users, and a strict-permissions toggle).
 
 The dashboard refreshes automatically every 15 seconds and after each action.
 

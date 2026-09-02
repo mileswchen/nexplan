@@ -103,6 +103,50 @@ describe('users', () => {
     // unregistered author is rejected once enforcement is on
     await expect(ws.assertCanWrite('ghost')).rejects.toThrow(/not registered/);
   });
+
+  it('restricts a project that has an explicit member roster', async () => {
+    await ws.createUser({ id: 'alice' }); // member
+    await ws.createUser({ id: 'boss', role: 'admin' });
+    await ws.createProject({ key: 'restricted', members: ['alice'] });
+    await expect(ws.assertProjectAccess('restricted', 'alice')).resolves.toBeUndefined();
+    await expect(ws.assertProjectAccess('restricted', 'bob')).rejects.toThrow(/not a project member/);
+    await expect(ws.assertProjectAccess('restricted', 'boss')).resolves.toBeUndefined(); // admin bypass
+    // An empty-roster project stays open to everyone.
+    await ws.createProject({ key: 'open' });
+    await expect(ws.assertProjectAccess('open', 'anyone')).resolves.toBeUndefined();
+  });
+
+  it('requires admin role for management when permissions are enforced', async () => {
+    await ws.createUser({ id: 'alice' });
+    await ws.createUser({ id: 'boss', role: 'admin' });
+    await ws.setEnforcePermissions(true);
+    await expect(ws.assertAdmin('alice')).rejects.toThrow(/admin role/);
+    await expect(ws.assertAdmin('boss')).resolves.toBeUndefined();
+  });
+
+  it('leaves management open when permissions are off', async () => {
+    await expect(ws.assertAdmin('nobody')).resolves.toBeUndefined();
+  });
+
+  it('lets a viewer read but not write a project', async () => {
+    await ws.createUser({ id: 'viewer1', role: 'viewer' });
+    await ws.createProject({ key: 'p1' });
+    await expect(ws.assertProjectAccess('p1', 'viewer1')).resolves.toBeUndefined();
+    await expect(ws.assertProjectAccess('p1', 'viewer1', { write: true })).rejects.toThrow(/read-only/);
+  });
+
+  it('reports per-project stats', async () => {
+    await ws.createProject({ key: 'a' });
+    await ws.createProject({ key: 'b' });
+    await ws.getStore('a').createWorkItem({ title: 'x' });
+    await ws.getStore('b').createBug({ title: 'bug' });
+    const stats = await ws.projectsStats();
+    const a = stats.find((s) => s.key === 'a');
+    const b = stats.find((s) => s.key === 'b');
+    expect(a?.summary.totalWorkItems).toBe(1);
+    expect(b?.summary.totalBugs).toBe(1);
+    expect(a?.summary.projectKey).toBe('a');
+  });
 });
 
 describe('legacy migration', () => {

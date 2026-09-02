@@ -44,11 +44,13 @@ function ok(data: unknown) {
 }
 
 // Resolve the project + store + acting author for a tool call.
-// `project` defaults to $NEXPLAN_PROJECT, then the workspace default.
-async function projectStore(workspace: Workspace, args: Record<string, unknown>) {
+// `project` defaults to $NEXPLAN_PROJECT, then the workspace default. Access is
+// gated by the project's member roster (and strict mode) via the workspace.
+async function projectStore(workspace: Workspace, args: Record<string, unknown>, opts: { write?: boolean } = {}) {
   const project = await workspace.resolveProject(args.project as string | undefined);
   const store = workspace.getStore(project);
   const actor = (args.author as string) || process.env.NEXPLAN_AGENT || 'agent';
+  await workspace.assertProjectAccess(project, actor, { write: opts.write });
   return { store, project, actor };
 }
 
@@ -83,8 +85,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       }),
     },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args);
-      await workspace.assertCanWrite(actor);
+      const { store, actor } = await projectStore(workspace, args, { write: true });
       const created = [];
       for (const it of args.items) {
         created.push(
@@ -152,8 +153,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       }),
     },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args);
-      await workspace.assertCanWrite(args.assignee || actor);
+      const { store, actor } = await projectStore(workspace, args, { write: true });
       return ok(await store.claimWorkItem(args.id, args.assignee || actor, args.status ?? 'in_progress', actor));
     },
   );
@@ -178,8 +178,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       }),
     },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args);
-      await workspace.assertCanWrite(actor);
+      const { store, actor } = await projectStore(workspace, args, { write: true });
       const { id, author: _a, project: _p, ...patch } = args;
       return ok(await store.updateWorkItem(id, patch as never, actor));
     },
@@ -201,8 +200,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       }),
     },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args);
-      await workspace.assertCanWrite(actor);
+      const { store, actor } = await projectStore(workspace, args, { write: true });
       return ok(await store.completeWorkItem(args.id, { note: args.note, closeLinkedBugs: args.closeLinkedBugs, author: actor }));
     },
   );
@@ -229,8 +227,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       }),
     },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args);
-      await workspace.assertCanWrite(actor);
+      const { store, actor } = await projectStore(workspace, args, { write: true });
       return ok(await store.decomposeWorkItem(args.parentId, args.children, actor));
     },
   );
@@ -248,8 +245,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       }),
     },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args);
-      await workspace.assertCanWrite(actor);
+      const { store, actor } = await projectStore(workspace, args, { write: true });
       return ok(await store.addWorkItemNote(args.id, args.body, actor));
     },
   );
@@ -293,8 +289,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       }),
     },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args);
-      await workspace.assertCanWrite(actor);
+      const { store, actor } = await projectStore(workspace, args, { write: true });
       return ok(await store.createDoc({ ...args, author: actor }));
     },
   );
@@ -316,8 +311,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       }),
     },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args);
-      await workspace.assertCanWrite(actor);
+      const { store, actor } = await projectStore(workspace, args, { write: true });
       const { slug, author: _a, project: _p, ...patch } = args;
       return ok(await store.updateDoc(slug, patch as never, actor));
     },
@@ -361,8 +355,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       }),
     },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args);
-      await workspace.assertCanWrite(actor);
+      const { store, actor } = await projectStore(workspace, args, { write: true });
       return ok(await store.createBug({ ...args, author: actor }));
     },
   );
@@ -391,8 +384,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     'nexplan_bug_update',
     { title: 'Update a bug', description: 'Update a bug (status, severity, assignee, workItem).', inputSchema: z.object({ id: z.string(), status: bugStatuses.optional(), severity: bugSeverities.optional(), assignee: z.string().nullish(), workItem: z.string().nullish(), author: z.string().optional(), project: projectOpt }) },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args);
-      await workspace.assertCanWrite(actor);
+      const { store, actor } = await projectStore(workspace, args, { write: true });
       const { id, author: _a, project: _p, ...patch } = args;
       return ok(await store.updateBug(id, patch as never, actor));
     },
@@ -444,12 +436,13 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
         key: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/).describe('Unique project key, e.g. api.'),
         name: z.string().optional(),
         description: z.string().optional(),
+        members: z.array(z.string()).optional().describe('User ids with access to this project.'),
         author: z.string().optional(),
       }),
     },
     async (args) => {
-      await workspace.assertCanWrite(args.author ?? 'agent');
-      return ok(await workspace.createProject({ key: args.key, name: args.name, description: args.description }));
+      await workspace.assertAdmin(args.author ?? 'agent');
+      return ok(await workspace.createProject({ key: args.key, name: args.name, description: args.description, members: args.members }));
     },
   );
 
@@ -457,7 +450,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     'nexplan_project_set_default',
     { title: 'Set the default project', description: 'Set the workspace default project used when a call omits `project`.', inputSchema: z.object({ key: z.string(), author: z.string().optional() }) },
     async (args) => {
-      await workspace.assertCanWrite(args.author ?? 'agent');
+      await workspace.assertAdmin(args.author ?? 'agent');
       await workspace.setDefaultProject(args.key);
       return ok({ ok: true, defaultProject: args.key });
     },
@@ -477,7 +470,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       inputSchema: z.object({ id: z.string(), name: z.string().optional(), kind: userKinds.optional(), role: userRoles.optional(), author: z.string().optional() }),
     },
     async (args) => {
-      await workspace.assertCanWrite(args.author ?? 'agent');
+      await workspace.assertAdmin(args.author ?? 'agent');
       return ok(await workspace.createUser({ id: args.id, name: args.name, kind: args.kind, role: args.role }));
     },
   );
@@ -486,7 +479,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     'nexplan_user_update',
     { title: 'Update a user', description: 'Change a user\'s name, kind or role.', inputSchema: z.object({ id: z.string(), name: z.string().optional(), kind: userKinds.optional(), role: userRoles.optional(), author: z.string().optional() }) },
     async (args) => {
-      await workspace.assertCanWrite(args.author ?? 'agent');
+      await workspace.assertAdmin(args.author ?? 'agent');
       return ok(await workspace.updateUser(args.id, { name: args.name, kind: args.kind, role: args.role }));
     },
   );

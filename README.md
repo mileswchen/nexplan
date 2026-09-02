@@ -19,6 +19,7 @@ trail, diffs, conflict-safe parallel work, and real version history for document
 | **手动录入 bug + Agent 自动发现的 bug** | `nexplan_bug_add/list/update`；完成关联 item 时自动 `fixed` |
 | **多项目管理** | 一个工作区可承载多个项目，各自独立的 backlog / 缺陷 / 文档；`--project` / `?project=` / MCP `project` 参数选择 |
 | **多用户管理** | 用户注册表（人类 + Agent）带角色 `admin / member / viewer`；`viewer` 只读，可强制校验 |
+| **访问控制** | 项目成员名单校验（有名单的项目仅限成员 + admin 访问）；开启严格模式后 `admin` 才能管理 |
 
 ## Quick start
 
@@ -133,9 +134,35 @@ nexplan user rm <id>
 
 # Workspace
 nexplan config set-enforce-permissions <true|false>
+nexplan agent config <user-id> [--project key]   # print an MCP config scoped to an agent + project
 ```
 
 Add `--json` to any command for JSON output.
+
+## Access control
+
+Permissions are layered:
+
+1. **Project member roster (always active)** — a project that lists `members` is
+   restricted to those members + admins, for both reads and writes. An empty roster
+   means the project stays open. Set members when creating a project
+   (`nexplan project new api --members alice,claude-code`) or in the Web admin page.
+2. **Strict mode (`nexplan config set-enforce-permissions true`)** — additionally
+   requires registered users for writes and makes `admin` the only role allowed to
+   manage the workspace (create/delete/update projects, users, config). A `viewer`
+   is read-only.
+
+To scope an agent to a project with permissions, generate its MCP config:
+
+```bash
+nexplan user add claude-code --kind agent --role member
+nexplan project new backend --members claude-code
+nexplan agent config claude-code --project backend
+```
+
+`agent config` prints a ready-to-paste MCP config with `NEXPLAN_PROJECT` +
+`NEXPLAN_AGENT` set, plus the agent's role/membership status. Grant access by adding
+the agent to a project's members, or by giving it the `admin` role.
 
 ## Agent integration
 

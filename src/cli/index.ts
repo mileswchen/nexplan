@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Store } from '../core/store.js';
 import { Workspace } from '../core/workspace.js';
 import { getBoardRoot } from '../core/paths.js';
@@ -10,7 +12,7 @@ const program = new Command();
 program
   .name('nexplan')
   .description('NexPlan — git-backed, multi-project project management hub for coding agents.')
-  .version('0.2.0')
+  .version('0.3.0')
   .option('--root <path>', 'Workspace dir (default: $NEXPLAN_BOARD or ./.nexplan)')
   .option('--project <key>', 'Project key (default: $NEXPLAN_PROJECT or the workspace default)')
   .option('--json', 'JSON output');
@@ -36,10 +38,19 @@ async function projectKey(): Promise<string> {
   return ws.resolveProject(program.opts().project || process.env.NEXPLAN_PROJECT);
 }
 
-// A Store scoped to the selected project.
-async function store(): Promise<Store> {
+// A Store scoped to the selected project, with access control applied.
+// `write=true` additionally enforces the viewer read-only rule.
+async function store(write = false): Promise<Store> {
   const ws = await workspace();
-  return ws.getStore(await projectKey());
+  const key = await projectKey();
+  const actor = process.env.NEXPLAN_AGENT || 'user';
+  await ws.assertProjectAccess(key, actor, { write });
+  return ws.getStore(key);
+}
+
+// Require the `admin` role for workspace management (no-op when permissions off).
+async function requireAdmin(): Promise<void> {
+  await (await workspace()).assertAdmin(process.env.NEXPLAN_AGENT || 'user');
 }
 
 function printJson(data: unknown): void {
@@ -68,7 +79,7 @@ program
   .option('--manual', 'Mark source as manual (human-entered).')
   .option('--json-input', 'Read a JSON array of items from stdin instead of flags.')
   .action(async (title: string | undefined, opts: Record<string, string>) => {
-    const s = await store();
+    const s = await store(true);
     const items = [];
     const source = opts.manual ? 'manual' : undefined;
     if (opts.jsonInput) {
@@ -142,7 +153,7 @@ program
   .option('--assignee <name>', 'Who claims it.', 'agent')
   .option('--status <s>', 'Status to set.', 'in_progress')
   .action(async (id: string, opts: Record<string, string>) => {
-    const w = await (await store()).claimWorkItem(id, opts.assignee, (opts.status as never) ?? 'in_progress');
+    const w = await (await store(true)).claimWorkItem(id, opts.assignee, (opts.status as never) ?? 'in_progress');
     if (program.opts().json) return printJson(w);
     process.stdout.write(formatWorkItem(w) + '\n');
   });
@@ -168,7 +179,7 @@ program
     if (opts.assignee !== undefined) patch.assignee = opts.assignee;
     if (opts.tags !== undefined) patch.tags = split(opts.tags);
     if (opts.estimate !== undefined) patch.estimate = Number(opts.estimate);
-    const w = await (await store()).updateWorkItem(id, patch);
+    const w = await (await store(true)).updateWorkItem(id, patch);
     if (program.opts().json) return printJson(w);
     process.stdout.write(formatWorkItem(w) + '\n');
   });
@@ -181,7 +192,7 @@ program
   .option('--no-close-bugs', 'Do not auto-close linked bugs.')
   .action(async (id: string, opts: Record<string, string>) => {
     const closeBugs = (opts as unknown as { closeBugs?: boolean }).closeBugs !== false;
-    const res = await (await store()).completeWorkItem(id, {
+    const res = await (await store(true)).completeWorkItem(id, {
       note: opts.note,
       closeLinkedBugs: closeBugs,
     });
@@ -197,7 +208,7 @@ program
   .action(async (parentId: string, opts: Record<string, string[] | string>) => {
     const children = (typeof opts.child === 'string' ? [opts.child] : opts.child ?? []).map((t) => ({ title: t }));
     if (!children.length) throw new Error('provide at least one --child');
-    const res = await (await store()).decomposeWorkItem(parentId, children);
+    const res = await (await store(true)).decomposeWorkItem(parentId, children);
     if (program.opts().json) return printJson(res);
     process.stdout.write(formatWorkItem(res.parent) + '\n');
     for (const c of res.children) process.stdout.write('  → ' + formatWorkItem(c) + '\n');
@@ -207,7 +218,7 @@ program
   .command('note <id> <body>')
   .description('Add a note to a work item.')
   .action(async (id: string, body: string) => {
-    const w = await (await store()).addWorkItemNote(id, body);
+    const w = await (await store(true)).addWorkItemNote(id, body);
     if (program.opts().json) return printJson(w);
     process.stdout.write(formatWorkItem(w) + '\n');
   });
@@ -225,7 +236,7 @@ bug
   .option('--tags <tags>')
   .option('--manual', 'Mark as human-entered.')
   .action(async (title: string, opts: Record<string, string>) => {
-    const b = await (await store()).createBug({
+    const b = await (await store(true)).createBug({
       title,
       description: opts.description,
       severity: opts.severity as never,
@@ -282,7 +293,7 @@ bug
     if (opts.severity !== undefined) patch.severity = opts.severity;
     if (opts.assignee !== undefined) patch.assignee = opts.assignee;
     if (opts.workItem !== undefined) patch.workItem = opts.workItem;
-    const b = await (await store()).updateBug(id, patch);
+    const b = await (await store(true)).updateBug(id, patch);
     if (program.opts().json) return printJson(b);
     process.stdout.write(formatBug(b) + '\n');
   });
@@ -321,7 +332,7 @@ docs
   .option('--tags <tags>')
   .option('--slug <slug>')
   .action(async (title: string, opts: Record<string, string>) => {
-    const d = await (await store()).createDoc({
+    const d = await (await store(true)).createDoc({
       title,
       type: opts.type as never,
       body: opts.body,
@@ -348,7 +359,7 @@ docs
     if (opts.type !== undefined) patch.type = opts.type;
     if (opts.status !== undefined) patch.status = opts.status;
     if (opts.tags !== undefined) patch.tags = split(opts.tags);
-    const d = await (await store()).updateDoc(slug, patch);
+    const d = await (await store(true)).updateDoc(slug, patch);
     if (program.opts().json) return printJson(d);
     process.stdout.write(`${d.slug} → v${d.meta.version}\n`);
   });
@@ -378,6 +389,7 @@ program
   .action(async () => {
     const ws = await workspace();
     const key = await projectKey();
+    await ws.assertProjectAccess(key, process.env.NEXPLAN_AGENT || 'user');
     const s = await ws.summary(key);
     if (program.opts().json) return printJson(s);
     out(`project: ${key}\n`);
@@ -412,6 +424,7 @@ projectCmd
   .option('--description <text>', 'Description.')
   .option('--members <ids>', 'Comma-separated user ids.')
   .action(async (key: string, opts: Record<string, string>) => {
+    await requireAdmin();
     const p = await (await workspace()).createProject({ key, name: opts.name, description: opts.description, members: split(opts.members) });
     if (program.opts().json) return printJson(p);
     out(`created project ${p.key} — ${p.name}\n`);
@@ -421,6 +434,7 @@ projectCmd
   .command('use <key>')
   .description('Set the default project.')
   .action(async (key: string) => {
+    await requireAdmin();
     await (await workspace()).setDefaultProject(key);
     out(`default project → ${key}\n`);
   });
@@ -442,6 +456,7 @@ projectCmd
   .command('rm <key>')
   .description('Delete a project (cannot delete the default).')
   .action(async (key: string) => {
+    await requireAdmin();
     await (await workspace()).deleteProject(key);
     out(`deleted project ${key}\n`);
   });
@@ -465,6 +480,7 @@ userCmd
   .option('--kind <kind>', 'human | agent.')
   .option('--role <role>', 'admin | member | viewer.', 'member')
   .action(async (id: string, opts: Record<string, string>) => {
+    await requireAdmin();
     const u = await (await workspace()).createUser({ id, name: opts.name, kind: opts.kind as never, role: opts.role as never });
     if (program.opts().json) return printJson(u);
     out(`added user ${u.id} (${u.role})\n`);
@@ -474,6 +490,7 @@ userCmd
   .command('role <id> <role>')
   .description('Set a user role (admin | member | viewer).')
   .action(async (id: string, role: string) => {
+    await requireAdmin();
     const u = await (await workspace()).updateUser(id, { role: role as never });
     if (program.opts().json) return printJson(u);
     out(`${u.id} → ${u.role}\n`);
@@ -483,6 +500,7 @@ userCmd
   .command('rm <id>')
   .description('Remove a user.')
   .action(async (id: string) => {
+    await requireAdmin();
     await (await workspace()).deleteUser(id);
     out(`removed user ${id}\n`);
   });
@@ -493,9 +511,45 @@ configCmd
   .command('set-enforce-permissions <true|false>')
   .description('Toggle strict permissions (registered users only, viewer is read-only).')
   .action(async (v: string) => {
+    await requireAdmin();
     const bool = /^(true|1|yes)$/i.test(v);
     await (await workspace()).setEnforcePermissions(bool);
     out(`enforcePermissions=${bool}\n`);
+  });
+
+// ---- agent config broadcast ----------------------------------------------------
+
+const agentCmd = program.command('agent').description('Agent config helpers.');
+
+agentCmd
+  .command('config <user-id>')
+  .description('Print an MCP config snippet scoped to a user (agent) + project, reflecting its role/membership.')
+  .action(async (id: string) => {
+    const ws = await workspace();
+    const proj = program.opts().project || (await ws.getDefaultProjectKey());
+    const user = await ws.getUser(id);
+    const project = await ws.getProject(proj);
+    const role = user?.role || 'member';
+    const member = project?.members?.includes(id);
+    const serverPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../mcp/server.js');
+    const config = {
+      mcpServers: {
+        nexplan: {
+          command: 'node',
+          args: [serverPath],
+          env: {
+            NEXPLAN_BOARD: root(),
+            NEXPLAN_PROJECT: proj,
+            NEXPLAN_AGENT: id,
+          },
+        },
+      },
+    };
+    if (program.opts().json) return printJson(config);
+    out(`${id} → role=${role}, project=${proj}${project ? `, member=${member ? 'yes' : 'no'}` : `, project "${proj}" not found`}\n\n`);
+    out('Add this to your agent\'s MCP server config:\n');
+    out(JSON.stringify(config, null, 2) + '\n');
+    out(`\nAccess note: the agent acts as "${id}" (${role}). Grant access by adding ${id} to project "${proj}" members, or grant the admin role.\n`);
   });
 
 program

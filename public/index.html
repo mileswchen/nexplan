@@ -161,6 +161,13 @@
 
   <!-- ADMIN -->
   <section id="view-admin" class="hidden">
+    <div class="panel" style="margin-bottom:16px">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">项目统计</h2>
+        <button class="btn" id="perm-toggle">权限：查看</button>
+      </div>
+      <div class="board" id="project-stats" style="margin-top:12px"></div>
+    </div>
     <div class="grid2">
       <div class="panel">
         <h2>项目</h2>
@@ -433,6 +440,34 @@ function editDoc(slug, content) {
 async function loadAdmin() {
   const w = await api.get('/api/workspace');
   const projects = w.projects, users = w.users;
+
+  // Per-project statistics cards.
+  const stats = await api.get('/api/projects/stats');
+  $('#project-stats').innerHTML = stats.map(p => {
+    const s = p.summary || {};
+    const done = s.workItems?.done || 0, inprog = s.workItems?.in_progress || 0;
+    const backlog = (s.totalWorkItems||0) - done - inprog;
+    const openBugs = s.bugs?.open || 0;
+    const memberCount = (p.members||[]).length;
+    return `<div class="col" data-key="${esc(p.key)}" style="cursor:pointer">
+      <h3>${esc(p.key)} <span class="count">${esc(p.name)}</span></h3>
+      <div class="card"><div class="title">待办 <b>${backlog}</b> · 进行中 <b>${inprog}</b> · 已完成 <b>${done}</b></div>
+        <div class="meta"><span class="badge sev-critical">缺陷 ${openBugs}</span><span class="muted">文档 ${s.docs||0}</span><span class="muted">成员 ${memberCount}</span></div></div>
+    </div>`;
+  }).join('') || '<div class="empty">暂无数据</div>';
+  document.querySelectorAll('#project-stats .col').forEach(c => c.onclick = () => {
+    project = c.dataset.key; $('#project-select').value = project; showTab('board');
+  });
+
+  // Permission toggle button.
+  const pt = $('#perm-toggle');
+  pt.textContent = '权限：' + (w.enforcePermissions ? '严格（已开启）' : '宽松（默认）');
+  pt.onclick = async () => {
+    const next = !w.enforcePermissions;
+    await api.send('/api/workspace/enforce-permissions', 'POST', { value: next });
+    await loadAdmin(); await refresh();
+  };
+
   $('#project-table').innerHTML = `<tr><th>Key</th><th>名称</th><th>成员</th><th></th></tr>` +
     projects.map(p => `<tr>
       <td>${esc(p.key)}${p.key===w.currentProject ? ' <span class="st">default</span>' : ''}</td>
@@ -533,13 +568,15 @@ function newProjectForm() {
     <label>Key（如 api）</label><input type="text" id="p-key" />
     <label>名称</label><input type="text" id="p-name" />
     <label>描述</label><input type="text" id="p-desc" />
+    <label>成员（用户 ID，逗号分隔；留空=公开）</label><input type="text" id="p-members" placeholder="alice,claude-code" />
     <div class="row" style="margin-top:12px"><button class="btn" id="p-cancel">取消</button>
       <button class="btn primary" id="p-save">创建</button></div>`);
   $('#p-cancel').onclick = closeModalX;
   $('#p-save').onclick = async () => {
     const key = $('#p-key').value.trim();
     if (!key) return alert('请输入 key');
-    await api.send('/api/projects', 'POST', { key, name: $('#p-name').value || key, description: $('#p-desc').value });
+    const members = $('#p-members').value.split(',').map(t=>t.trim()).filter(Boolean);
+    await api.send('/api/projects', 'POST', { key, name: $('#p-name').value || key, description: $('#p-desc').value, members });
     closeModalX(); await initProjects(); await showTab('admin'); await loadAdmin();
   };
 }

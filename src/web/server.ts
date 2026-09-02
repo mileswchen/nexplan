@@ -36,10 +36,15 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   });
   await workspace.init();
 
+  // The web dashboard acts as NEXPLAN_AGENT (or 'user') for permission checks.
+  const webActor = () => process.env.NEXPLAN_AGENT || 'user';
+
   // Resolve the project store for a request. `?project=<key>` overrides
-  // $NEXPLAN_PROJECT, which overrides the workspace default.
-  async function storeFor(req: Request): Promise<Store> {
+  // $NEXPLAN_PROJECT, which overrides the workspace default. Access is gated by
+  // the project's member roster (and strict mode).
+  async function storeFor(req: Request, write = false): Promise<Store> {
     const key = await workspace.resolveProject((req.query.project as string) || process.env.NEXPLAN_PROJECT);
+    await workspace.assertProjectAccess(key, webActor(), { write });
     return workspace.getStore(key);
   }
 
@@ -64,6 +69,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workspace/default-project', async (req, res, next) => {
     try {
+      await workspace.assertAdmin(webActor());
       await workspace.setDefaultProject(req.body.key);
       res.json({ ok: true, defaultProject: req.body.key });
     } catch (e) {
@@ -73,6 +79,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workspace/enforce-permissions', async (req, res, next) => {
     try {
+      await workspace.assertAdmin(webActor());
       await workspace.setEnforcePermissions(Boolean(req.body.value));
       res.json({ ok: true });
     } catch (e) {
@@ -89,8 +96,17 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
     }
   });
 
+  app.get('/api/projects/stats', async (_req, res, next) => {
+    try {
+      res.json(await workspace.projectsStats());
+    } catch (e) {
+      next(e);
+    }
+  });
+
   app.post('/api/projects', async (req, res, next) => {
     try {
+      await workspace.assertAdmin(webActor());
       const { key, name, description, members } = req.body;
       res.status(201).json(await workspace.createProject({ key, name, description, members }));
     } catch (e) {
@@ -100,6 +116,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.patch('/api/projects/:key', async (req, res, next) => {
     try {
+      await workspace.assertAdmin(webActor());
       const { name, description, members } = req.body;
       res.json(await workspace.updateProject(req.params.key, { name, description, members }));
     } catch (e) {
@@ -109,6 +126,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.delete('/api/projects/:key', async (req, res, next) => {
     try {
+      await workspace.assertAdmin(webActor());
       await workspace.deleteProject(req.params.key);
       res.json({ ok: true, key: req.params.key });
     } catch (e) {
@@ -127,6 +145,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/users', async (req, res, next) => {
     try {
+      await workspace.assertAdmin(webActor());
       const { id, name, kind, role } = req.body;
       res.status(201).json(await workspace.createUser({ id, name, kind, role }));
     } catch (e) {
@@ -136,6 +155,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.patch('/api/users/:id', async (req, res, next) => {
     try {
+      await workspace.assertAdmin(webActor());
       const { name, kind, role } = req.body;
       res.json(await workspace.updateUser(req.params.id, { name, kind, role }));
     } catch (e) {
@@ -145,6 +165,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.delete('/api/users/:id', async (req, res, next) => {
     try {
+      await workspace.assertAdmin(webActor());
       await workspace.deleteUser(req.params.id);
       res.json({ ok: true, id: req.params.id });
     } catch (e) {
@@ -155,7 +176,9 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   // ------------------------------------------------------------ work items
   app.get('/api/board', async (req, res, next) => {
     try {
-      res.json(await workspace.summary(req.query.project as string | undefined));
+      const key = await workspace.resolveProject((req.query.project as string) || process.env.NEXPLAN_PROJECT);
+      await workspace.assertProjectAccess(key, webActor());
+      res.json(await workspace.summary(key));
     } catch (e) {
       next(e);
     }
@@ -192,7 +215,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workitems', async (req, res, next) => {
     try {
-      const store = await storeFor(req);
+      const store = await storeFor(req, true);
       const items = Array.isArray(req.body) ? req.body : [req.body];
       const created = [];
       for (const it of items) created.push(await store.createWorkItem({ ...it, author: it.author ?? 'user' }));
@@ -205,7 +228,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.patch('/api/workitems/:id', async (req, res, next) => {
     try {
       const { author, ...patch } = req.body;
-      res.json(await (await storeFor(req)).updateWorkItem(req.params.id, patch, author ?? 'user'));
+      res.json(await (await storeFor(req, true)).updateWorkItem(req.params.id, patch, author ?? 'user'));
     } catch (e) {
       next(e);
     }
@@ -214,7 +237,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.post('/api/workitems/:id/claim', async (req, res, next) => {
     try {
       const { assignee, status, author } = req.body;
-      res.json(await (await storeFor(req)).claimWorkItem(req.params.id, assignee || 'user', status ?? 'in_progress', author ?? 'user'));
+      res.json(await (await storeFor(req, true)).claimWorkItem(req.params.id, assignee || 'user', status ?? 'in_progress', author ?? 'user'));
     } catch (e) {
       next(e);
     }
@@ -223,7 +246,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.post('/api/workitems/:id/complete', async (req, res, next) => {
     try {
       const { note, closeLinkedBugs, author } = req.body;
-      res.json(await (await storeFor(req)).completeWorkItem(req.params.id, { note, closeLinkedBugs, author: author ?? 'user' }));
+      res.json(await (await storeFor(req, true)).completeWorkItem(req.params.id, { note, closeLinkedBugs, author: author ?? 'user' }));
     } catch (e) {
       next(e);
     }
@@ -232,7 +255,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.post('/api/workitems/:id/note', async (req, res, next) => {
     try {
       const { body, author } = req.body;
-      res.json(await (await storeFor(req)).addWorkItemNote(req.params.id, body, author ?? 'user'));
+      res.json(await (await storeFor(req, true)).addWorkItemNote(req.params.id, body, author ?? 'user'));
     } catch (e) {
       next(e);
     }
@@ -241,7 +264,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.post('/api/workitems/:id/decompose', async (req, res, next) => {
     try {
       const { children, author } = req.body;
-      res.json(await (await storeFor(req)).decomposeWorkItem(req.params.id, children ?? [], author ?? 'user'));
+      res.json(await (await storeFor(req, true)).decomposeWorkItem(req.params.id, children ?? [], author ?? 'user'));
     } catch (e) {
       next(e);
     }
@@ -267,7 +290,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/bugs', async (req, res, next) => {
     try {
-      const b = await (await storeFor(req)).createBug({ ...req.body, author: req.body.author ?? 'user' });
+      const b = await (await storeFor(req, true)).createBug({ ...req.body, author: req.body.author ?? 'user' });
       res.status(201).json(b);
     } catch (e) {
       next(e);
@@ -277,7 +300,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.patch('/api/bugs/:id', async (req, res, next) => {
     try {
       const { author, ...patch } = req.body;
-      res.json(await (await storeFor(req)).updateBug(req.params.id, patch, author ?? 'user'));
+      res.json(await (await storeFor(req, true)).updateBug(req.params.id, patch, author ?? 'user'));
     } catch (e) {
       next(e);
     }
@@ -322,7 +345,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.post('/api/docs', async (req, res, next) => {
     try {
       const { author, ...input } = req.body;
-      res.status(201).json(await (await storeFor(req)).createDoc({ ...input, author: author ?? 'user' }));
+      res.status(201).json(await (await storeFor(req, true)).createDoc({ ...input, author: author ?? 'user' }));
     } catch (e) {
       next(e);
     }
@@ -331,7 +354,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.patch('/api/docs/:slug', async (req, res, next) => {
     try {
       const { author, ...patch } = req.body;
-      res.json(await (await storeFor(req)).updateDoc(req.params.slug, patch, author ?? 'user'));
+      res.json(await (await storeFor(req, true)).updateDoc(req.params.slug, patch, author ?? 'user'));
     } catch (e) {
       next(e);
     }

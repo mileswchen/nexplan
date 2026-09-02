@@ -79,9 +79,13 @@ nexplan web [--port n]   # Web 看板（默认 3344）
 
 | 命令 | 说明 |
 |---|---|
-| `nexplan project list` / `new <key> [--name n]` / `use <key>` / `show <key>` / `rm <key>` | 项目管理 |
+| `nexplan project list` / `new <key> [--name n] [--members a,b]` / `use <key>` / `show <key>` / `rm <key>` | 项目管理 |
 | `nexplan user list` / `add <id> [--kind human\|agent] [--role r]` / `role <id> <admin\|member\|viewer>` / `rm <id>` | 用户与角色 |
-| `nexplan config set-enforce-permissions <true\|false>` | 仅限已注册用户写入；`viewer` 只读 |
+| `nexplan config set-enforce-permissions <true\|false>` | 仅限已注册用户写入；`admin` 才能管理；`viewer` 只读 |
+| `nexplan agent config <id> [--project key]` | 打印限定到 Agent+项目的 MCP 配置 |
+
+**访问控制**：有 `members` 名单的项目仅限成员 + admin 访问；空名单=公开。严格模式开启后，
+管理需 `admin` 角色。授权示例：`nexplan user add alice --role member; nexplan project new api --members alice; nexplan agent config alice --project api`。
 
 ## MCP（给 Agent）/ For agents
 
