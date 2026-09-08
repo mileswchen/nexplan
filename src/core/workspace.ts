@@ -3,6 +3,7 @@ import path from 'node:path';
 import { Git } from './git.js';
 import { Store } from './store.js';
 import { NOW } from './frontmatter.js';
+import { hashPassword, verifyPassword } from './auth.js';
 import {
   Project,
   ProjectSummary,
@@ -26,6 +27,8 @@ export interface WorkspaceConfig {
 
 const DEFAULT_PROJECT_KEY = 'default';
 const DEFAULT_USER_ROLES: UserRole[] = ['admin', 'member', 'viewer'];
+const DEFAULT_ADMIN_ID = 'admin';
+const DEFAULT_ADMIN_PASSWORD = 'admin';
 
 /**
  * A Workspace hosts multiple projects (each a per-project board backed by the
@@ -74,6 +77,7 @@ export class Workspace {
     await this.migrateLegacy();
 
     await this.ensureDefaultProject();
+    await this.ensureAdminExists();
     await this.commitMeta('workspace: init');
   }
 
@@ -264,6 +268,7 @@ export class Workspace {
   }
 
   async setEnforcePermissions(value: boolean): Promise<void> {
+    if (value) await this.ensureAdminExists(); // never enable strict mode with no admin
     const cfg = await this.loadConfig();
     cfg.enforcePermissions = value;
     await this.writeJson(path.join(this.root, 'workspace.json'), cfg);
@@ -323,7 +328,7 @@ export class Workspace {
     return (await this.readJson<User>(path.join(this.root, 'users', `${id}.json`))) ?? null;
   }
 
-  async createUser(input: { id: string; name?: string; kind?: UserKind; role?: UserRole }): Promise<User> {
+  async createUser(input: { id: string; name?: string; kind?: UserKind; role?: UserRole; password?: string }): Promise<User> {
     const id = input.id.trim();
     if (!id) throw new Error('user id required');
     if (await this.getUser(id)) throw new Error(`user already exists: ${id}`);
@@ -334,12 +339,38 @@ export class Workspace {
       role: this.validRole(input.role) ?? 'member',
       createdAt: NOW(),
     };
-    await this.writeJson(path.join(this.root, 'users', `${id}.json`), user);
+    if (input.password) user.passwordHash = hashPassword(input.password);
+    await this.writeUserFile(user);
     await this.commitMeta(`user: create ${id}`);
     return user;
   }
 
-  async updateUser(id: string, patch: { name?: string; kind?: UserKind; role?: UserRole }): Promise<User> {
+  /**
+   * Guarantee the workspace always has at least one `admin` so that strict mode
+   * (`enforcePermissions`) can never lock everyone out of management. Called on
+   * init and whenever strict mode is enabled; only writes when it is actually
+   * missing (and the default id is not already taken by a non-admin).
+   */
+  private async ensureAdminExists(): Promise<void> {
+    const users = await this.listUsers();
+    if (users.some((u) => u.role === 'admin')) return; // an admin already exists
+    if (await this.getUser(DEFAULT_ADMIN_ID)) return; // id taken by a non-admin; leave it alone
+    await this.writeUserFile({
+      id: DEFAULT_ADMIN_ID,
+      name: DEFAULT_ADMIN_ID,
+      kind: 'human',
+      role: 'admin',
+      createdAt: NOW(),
+      passwordHash: hashPassword(DEFAULT_ADMIN_PASSWORD),
+      mustChangePassword: true,
+    });
+  }
+
+  private async writeUserFile(user: User): Promise<void> {
+    await this.writeJson(path.join(this.root, 'users', `${user.id}.json`), user);
+  }
+
+  async updateUser(id: string, patch: { name?: string; kind?: UserKind; role?: UserRole; password?: string }): Promise<User> {
     const existing = await this.getUser(id);
     if (!existing) throw new Error(`user not found: ${id}`);
     const updated: User = {
@@ -348,9 +379,29 @@ export class Workspace {
       kind: patch.kind ?? existing.kind,
       role: this.validRole(patch.role) ?? existing.role,
     };
-    await this.writeJson(path.join(this.root, 'users', `${id}.json`), updated);
+    if (patch.password) {
+      updated.passwordHash = hashPassword(patch.password);
+      updated.mustChangePassword = false;
+    }
+    await this.writeUserFile(updated);
     await this.commitMeta(`user: update ${id}`);
     return updated;
+  }
+
+  /** Set (or reset) a user's password. Clears the must-change-on-login flag. */
+  async setUserPassword(id: string, password: string): Promise<void> {
+    const existing = await this.getUser(id);
+    if (!existing) throw new Error(`user not found: ${id}`);
+    if (!password) throw new Error('password required');
+    await this.writeUserFile({ ...existing, passwordHash: hashPassword(password), mustChangePassword: false });
+    await this.commitMeta(`user: set password ${id}`);
+  }
+
+  /** Verify a password for a user id. Unknown users and users without a hash fail. */
+  async verifyUserPassword(id: string, password: string): Promise<boolean> {
+    const user = await this.getUser(id);
+    if (!user?.passwordHash) return false;
+    return verifyPassword(password, user.passwordHash);
   }
 
   async deleteUser(id: string): Promise<void> {

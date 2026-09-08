@@ -1,10 +1,12 @@
 import express, { Request, Response, NextFunction } from 'express';
+import { createHmac } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../core/store.js';
 import { Workspace } from '../core/workspace.js';
-import { BugFilter, ListFilter } from '../core/types.js';
+import { generateSecret } from '../core/auth.js';
+import { BugFilter, ListFilter, User } from '../core/types.js';
 
 export interface WebServerOptions {
   port?: number;
@@ -36,15 +38,79 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   });
   await workspace.init();
 
-  // The web dashboard acts as NEXPLAN_AGENT (or 'user') for permission checks.
-  const webActor = () => process.env.NEXPLAN_AGENT || 'user';
+  // The web dashboard is authenticated per-request via a signed session cookie for
+  // human users. Human users log in with a password; agent identity (MCP/CLI) is
+  // unaffected. Anonymous requests may read open projects but cannot write/manage.
+  const COOKIE = 'nexplan_session';
+  const SESSION_TTL = 60 * 60 * 24 * 7; // 7 days
+
+  const secretFile = path.join(boardRoot, '.web-secret');
+  const secret = await (async () => {
+    try {
+      return (await fs.readFile(secretFile, 'utf8')).trim();
+    } catch {
+      const s = generateSecret();
+      await fs.writeFile(secretFile, s, 'utf8');
+      return s;
+    }
+  })();
+
+  const sign = (data: string) => createHmac('sha256', secret).update(data).digest('hex');
+  const makeToken = (userId: string) => {
+    const body = Buffer.from(JSON.stringify({ uid: userId, exp: Date.now() + SESSION_TTL * 1000 })).toString('base64url');
+    return `${body}.${sign(body)}`;
+  };
+  const parseToken = (token: string): string | null => {
+    const [body, sig] = token.split('.');
+    if (!body || !sig || sign(body) !== sig) return null;
+    try {
+      const data = JSON.parse(Buffer.from(body, 'base64url').toString());
+      if (!data.uid || data.exp < Date.now()) return null;
+      return data.uid;
+    } catch {
+      return null;
+    }
+  };
+  const readCookie = (req: Request): string | null => {
+    const h = req.headers.cookie;
+    if (!h) return null;
+    for (const part of h.split(';')) {
+      const [k, ...v] = part.trim().split('=');
+      if (k === COOKIE) return v.join('=');
+    }
+    return null;
+  };
+  const setSession = (res: Response, userId: string) => {
+    res.setHeader('Set-Cookie', `${COOKIE}=${makeToken(userId)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL}`);
+  };
+  const clearSession = (res: Response) => {
+    res.setHeader('Set-Cookie', `${COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  };
+  const publicUser = (u?: User | null) =>
+    u ? { id: u.id, name: u.name, kind: u.kind, role: u.role, mustChangePassword: !!u.mustChangePassword } : null;
+  const httpError = (status: number, message: string) => {
+    const e = new Error(message) as Error & { status: number };
+    e.status = status;
+    return e;
+  };
+
+  // Resolve the logged-in human user (if any) for this request.
+  const webUser = (req: Request): User | null => (req as Request & { webUser?: User | null }).webUser ?? null;
+  const requireLogin = (req: Request): User => {
+    const u = webUser(req);
+    if (!u) throw httpError(401, 'please log in');
+    return u;
+  };
+  const me = (req: Request): string => requireLogin(req).id;
 
   // Resolve the project store for a request. `?project=<key>` overrides
   // $NEXPLAN_PROJECT, which overrides the workspace default. Access is gated by
-  // the project's member roster (and strict mode).
+  // the project's member roster (and strict mode). Writes require a login.
   async function storeFor(req: Request, write = false): Promise<Store> {
+    const user = webUser(req);
+    if (write && !user) throw httpError(401, 'please log in');
     const key = await workspace.resolveProject((req.query.project as string) || process.env.NEXPLAN_PROJECT);
-    await workspace.assertProjectAccess(key, webActor(), { write });
+    await workspace.assertProjectAccess(key, user?.id, { write });
     return workspace.getStore(key);
   }
 
@@ -54,12 +120,62 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   const publicDir = path.join(pkgRoot, 'public');
   app.use(express.static(publicDir));
 
+  // Resolve the logged-in human user for each request (web-only login).
+  app.use(async (req, _res, next) => {
+    try {
+      const token = readCookie(req);
+      const uid = token ? parseToken(token) : null;
+      (req as Request & { webUser?: User | null }).webUser = uid ? await workspace.getUser(uid) : null;
+      next();
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  // ------------------------------------------------------------ auth (web login)
+  app.get('/api/auth/me', async (req, res) => {
+    res.json({ user: publicUser(webUser(req)) });
+  });
+
+  app.post('/api/auth/login', async (req, res, next) => {
+    try {
+      const { id, password } = req.body || {};
+      const user = await workspace.getUser(String(id || '').trim());
+      if (!user || !(await workspace.verifyUserPassword(user.id, String(password || '')))) {
+        return res.status(401).json({ error: 'invalid credentials' });
+      }
+      setSession(res, user.id);
+      res.json({ ok: true, user: publicUser(user) });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/auth/logout', (_req, res) => {
+    clearSession(res);
+    res.json({ ok: true });
+  });
+
+  app.post('/api/auth/change-password', async (req, res, next) => {
+    try {
+      const user = requireLogin(req);
+      const { password } = req.body || {};
+      if (!password || String(password).length < 4) {
+        return res.status(400).json({ error: 'password must be at least 4 characters' });
+      }
+      await workspace.setUserPassword(user.id, String(password));
+      res.json({ ok: true });
+    } catch (e) {
+      next(e);
+    }
+  });
+
   // ------------------------------------------------------------ workspace
   app.get('/api/workspace', async (_req, res, next) => {
     try {
       const cfg = await workspace.getConfig();
       const projects = await workspace.listProjects();
-      const users = await workspace.listUsers();
+      const users = (await workspace.listUsers()).map((u) => publicUser(u));
       const current = await workspace.resolveProject();
       res.json({ ...cfg, currentProject: current, projects, users });
     } catch (e) {
@@ -69,7 +185,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workspace/default-project', async (req, res, next) => {
     try {
-      await workspace.assertAdmin(webActor());
+      await workspace.assertAdmin(requireLogin(req).id);
       await workspace.setDefaultProject(req.body.key);
       res.json({ ok: true, defaultProject: req.body.key });
     } catch (e) {
@@ -79,7 +195,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workspace/enforce-permissions', async (req, res, next) => {
     try {
-      await workspace.assertAdmin(webActor());
+      await workspace.assertAdmin(requireLogin(req).id);
       await workspace.setEnforcePermissions(Boolean(req.body.value));
       res.json({ ok: true });
     } catch (e) {
@@ -106,7 +222,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/projects', async (req, res, next) => {
     try {
-      await workspace.assertAdmin(webActor());
+      await workspace.assertAdmin(requireLogin(req).id);
       const { key, name, description, members } = req.body;
       res.status(201).json(await workspace.createProject({ key, name, description, members }));
     } catch (e) {
@@ -116,7 +232,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.patch('/api/projects/:key', async (req, res, next) => {
     try {
-      await workspace.assertAdmin(webActor());
+      await workspace.assertAdmin(requireLogin(req).id);
       const { name, description, members } = req.body;
       res.json(await workspace.updateProject(req.params.key, { name, description, members }));
     } catch (e) {
@@ -126,7 +242,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.delete('/api/projects/:key', async (req, res, next) => {
     try {
-      await workspace.assertAdmin(webActor());
+      await workspace.assertAdmin(requireLogin(req).id);
       await workspace.deleteProject(req.params.key);
       res.json({ ok: true, key: req.params.key });
     } catch (e) {
@@ -137,7 +253,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   // ------------------------------------------------------------ users
   app.get('/api/users', async (_req, res, next) => {
     try {
-      res.json(await workspace.listUsers());
+      res.json((await workspace.listUsers()).map((u) => publicUser(u)));
     } catch (e) {
       next(e);
     }
@@ -145,9 +261,9 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/users', async (req, res, next) => {
     try {
-      await workspace.assertAdmin(webActor());
-      const { id, name, kind, role } = req.body;
-      res.status(201).json(await workspace.createUser({ id, name, kind, role }));
+      await workspace.assertAdmin(requireLogin(req).id);
+      const { id, name, kind, role, password } = req.body;
+      res.status(201).json(publicUser(await workspace.createUser({ id, name, kind, role, password })));
     } catch (e) {
       next(e);
     }
@@ -155,9 +271,9 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.patch('/api/users/:id', async (req, res, next) => {
     try {
-      await workspace.assertAdmin(webActor());
-      const { name, kind, role } = req.body;
-      res.json(await workspace.updateUser(req.params.id, { name, kind, role }));
+      await workspace.assertAdmin(requireLogin(req).id);
+      const { name, kind, role, password } = req.body;
+      res.json(publicUser(await workspace.updateUser(req.params.id, { name, kind, role, password })));
     } catch (e) {
       next(e);
     }
@@ -165,7 +281,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.delete('/api/users/:id', async (req, res, next) => {
     try {
-      await workspace.assertAdmin(webActor());
+      await workspace.assertAdmin(requireLogin(req).id);
       await workspace.deleteUser(req.params.id);
       res.json({ ok: true, id: req.params.id });
     } catch (e) {
@@ -177,7 +293,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   app.get('/api/board', async (req, res, next) => {
     try {
       const key = await workspace.resolveProject((req.query.project as string) || process.env.NEXPLAN_PROJECT);
-      await workspace.assertProjectAccess(key, webActor());
+      await workspace.assertProjectAccess(key, webUser(req)?.id);
       res.json(await workspace.summary(key));
     } catch (e) {
       next(e);
@@ -218,7 +334,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
       const store = await storeFor(req, true);
       const items = Array.isArray(req.body) ? req.body : [req.body];
       const created = [];
-      for (const it of items) created.push(await store.createWorkItem({ ...it, author: it.author ?? 'user' }));
+      for (const it of items) created.push(await store.createWorkItem({ ...it, author: me(req) }));
       res.status(201).json(created);
     } catch (e) {
       next(e);
@@ -227,8 +343,8 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.patch('/api/workitems/:id', async (req, res, next) => {
     try {
-      const { author, ...patch } = req.body;
-      res.json(await (await storeFor(req, true)).updateWorkItem(req.params.id, patch, author ?? 'user'));
+      const { author: _author, ...patch } = req.body;
+      res.json(await (await storeFor(req, true)).updateWorkItem(req.params.id, patch, me(req)));
     } catch (e) {
       next(e);
     }
@@ -236,8 +352,8 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workitems/:id/claim', async (req, res, next) => {
     try {
-      const { assignee, status, author } = req.body;
-      res.json(await (await storeFor(req, true)).claimWorkItem(req.params.id, assignee || 'user', status ?? 'in_progress', author ?? 'user'));
+      const { assignee, status } = req.body;
+      res.json(await (await storeFor(req, true)).claimWorkItem(req.params.id, assignee || me(req), status ?? 'in_progress', me(req)));
     } catch (e) {
       next(e);
     }
@@ -245,8 +361,8 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workitems/:id/complete', async (req, res, next) => {
     try {
-      const { note, closeLinkedBugs, author } = req.body;
-      res.json(await (await storeFor(req, true)).completeWorkItem(req.params.id, { note, closeLinkedBugs, author: author ?? 'user' }));
+      const { note, closeLinkedBugs } = req.body;
+      res.json(await (await storeFor(req, true)).completeWorkItem(req.params.id, { note, closeLinkedBugs, author: me(req) }));
     } catch (e) {
       next(e);
     }
@@ -254,8 +370,8 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workitems/:id/note', async (req, res, next) => {
     try {
-      const { body, author } = req.body;
-      res.json(await (await storeFor(req, true)).addWorkItemNote(req.params.id, body, author ?? 'user'));
+      const { body } = req.body;
+      res.json(await (await storeFor(req, true)).addWorkItemNote(req.params.id, body, me(req)));
     } catch (e) {
       next(e);
     }
@@ -263,8 +379,8 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workitems/:id/decompose', async (req, res, next) => {
     try {
-      const { children, author } = req.body;
-      res.json(await (await storeFor(req, true)).decomposeWorkItem(req.params.id, children ?? [], author ?? 'user'));
+      const { children } = req.body;
+      res.json(await (await storeFor(req, true)).decomposeWorkItem(req.params.id, children ?? [], me(req)));
     } catch (e) {
       next(e);
     }
@@ -290,7 +406,7 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/bugs', async (req, res, next) => {
     try {
-      const b = await (await storeFor(req, true)).createBug({ ...req.body, author: req.body.author ?? 'user' });
+      const b = await (await storeFor(req, true)).createBug({ ...req.body, author: me(req) });
       res.status(201).json(b);
     } catch (e) {
       next(e);
@@ -299,8 +415,8 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.patch('/api/bugs/:id', async (req, res, next) => {
     try {
-      const { author, ...patch } = req.body;
-      res.json(await (await storeFor(req, true)).updateBug(req.params.id, patch, author ?? 'user'));
+      const { author: _author, ...patch } = req.body;
+      res.json(await (await storeFor(req, true)).updateBug(req.params.id, patch, me(req)));
     } catch (e) {
       next(e);
     }
@@ -344,8 +460,8 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/docs', async (req, res, next) => {
     try {
-      const { author, ...input } = req.body;
-      res.status(201).json(await (await storeFor(req, true)).createDoc({ ...input, author: author ?? 'user' }));
+      const { author: _author, ...input } = req.body;
+      res.status(201).json(await (await storeFor(req, true)).createDoc({ ...input, author: me(req) }));
     } catch (e) {
       next(e);
     }
@@ -353,8 +469,8 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.patch('/api/docs/:slug', async (req, res, next) => {
     try {
-      const { author, ...patch } = req.body;
-      res.json(await (await storeFor(req, true)).updateDoc(req.params.slug, patch, author ?? 'user'));
+      const { author: _author, ...patch } = req.body;
+      res.json(await (await storeFor(req, true)).updateDoc(req.params.slug, patch, me(req)));
     } catch (e) {
       next(e);
     }
@@ -365,8 +481,8 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
     res.sendFile(path.join(publicDir, 'index.html'));
   });
 
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-    res.status(500).json({ error: err.message });
+  app.use((err: Error & { status?: number }, _req: Request, res: Response, _next: NextFunction) => {
+    res.status(err.status ?? 500).json({ error: err.message });
   });
 
   const port = opts.port ?? Number(process.env.PORT ?? 3344);

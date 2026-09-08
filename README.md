@@ -128,8 +128,9 @@ nexplan project rm <key>
 
 # Multi-user
 nexplan user list
-nexplan user add <id> [--name n] [--kind human|agent] [--role admin|member|viewer]
+nexplan user add <id> [--name n] [--kind human|agent] [--role admin|member|viewer] [--password pw]
 nexplan user role <id> <admin|member|viewer>
+nexplan user password <id> [<pw>]   # set/reset a login password
 nexplan user rm <id>
 
 # Workspace
@@ -151,6 +152,16 @@ Permissions are layered:
    requires registered users for writes and makes `admin` the only role allowed to
    manage the workspace (create/delete/update projects, users, config). A `viewer`
    is read-only.
+
+   Every workspace auto-bootstraps a default **`admin`** user on init (and re-seeds
+   one when strict mode is enabled), so enabling strict mode can never lock you out
+   of workspace management — you always have an `admin` to operate as.
+
+3. **Web login (human users)** — the web dashboard now authenticates humans with a
+   password. The default `admin` has the initial password `admin` and is forced to
+   change it on first login. Anonymous requests can **read** open projects but must
+   **log in** to write or manage. Agent users have no password and are authorized by
+   id + project membership (unchanged).
 
 To scope an agent to a project with permissions, generate its MCP config:
 

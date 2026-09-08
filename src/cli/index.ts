@@ -479,11 +479,21 @@ userCmd
   .option('--name <name>', 'Display name.')
   .option('--kind <kind>', 'human | agent.')
   .option('--role <role>', 'admin | member | viewer.', 'member')
+  .option('--password <password>', 'Optional login password (humans).')
   .action(async (id: string, opts: Record<string, string>) => {
     await requireAdmin();
-    const u = await (await workspace()).createUser({ id, name: opts.name, kind: opts.kind as never, role: opts.role as never });
+    const u = await (await workspace()).createUser({ id, name: opts.name, kind: opts.kind as never, role: opts.role as never, password: opts.password });
     if (program.opts().json) return printJson(u);
-    out(`added user ${u.id} (${u.role})\n`);
+    out(`added user ${u.id} (${u.role})${u.passwordHash ? ' with a password' : ''}\n`);
+  });
+
+userCmd
+  .command('password <id> [password]')
+  .description('Set or reset a user login password.')
+  .action(async (id: string, password: string | undefined) => {
+    await requireAdmin();
+    await (await workspace()).setUserPassword(id, password || '');
+    out(`password set for ${id}\n`);
   });
 
 userCmd

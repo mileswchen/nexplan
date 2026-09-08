@@ -129,6 +129,10 @@ export interface User {
   kind: UserKind;
   role: UserRole;
   createdAt: string;
+  /** Scrypt hash (`scrypt$salt$hash`) for human logins. Absent for agent users. */
+  passwordHash?: string;
+  /** True when a default password was issued and must be changed on first login. */
+  mustChangePassword?: boolean;
 }
 
 export interface Project {

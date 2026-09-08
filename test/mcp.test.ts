@@ -134,9 +134,9 @@ describe('MCP server tools', () => {
     await call('nexplan_user_add', { id: 'claude-code', kind: 'agent', role: 'member' });
     const users = await call('nexplan_user_list', {});
     const list = (users.structuredContent as any).items;
-    expect(list).toHaveLength(1);
-    expect(list[0].id).toBe('claude-code');
-    expect(list[0].kind).toBe('agent');
+    expect(list.map((u: any) => u.id).sort()).toEqual(['admin', 'claude-code']);
+    const claude = list.find((u: any) => u.id === 'claude-code');
+    expect(claude.kind).toBe('agent');
   });
 
   it('enforces a project member roster for board access', async () => {

@@ -23,7 +23,8 @@ describe('init', () => {
     expect(projects.map((p) => p.key)).toContain('default');
     expect(await ws.getDefaultProjectKey()).toBe('default');
     const users = await ws.listUsers();
-    expect(users).toEqual([]);
+    expect(users.map((u) => u.id)).toEqual(['admin']);
+    expect(users[0].role).toBe('admin');
     // default project has a working board
     const item = await ws.getStore('default').createWorkItem({ title: 'Init' });
     expect(item.id).toBe('WI-1');
@@ -85,7 +86,7 @@ describe('users', () => {
     expect(await ws.roleOf('xiaomo')).toBe('admin');
     expect(await ws.roleOf('unknown')).toBe('member');
     const users = await ws.listUsers();
-    expect(users.map((x) => x.id)).toEqual(['claude-code', 'xiaomo']);
+    expect(users.map((x) => x.id)).toEqual(['admin', 'claude-code', 'xiaomo']);
   });
 
   it('updates and deletes users', async () => {
@@ -122,6 +123,34 @@ describe('users', () => {
     await ws.setEnforcePermissions(true);
     await expect(ws.assertAdmin('alice')).rejects.toThrow(/admin role/);
     await expect(ws.assertAdmin('boss')).resolves.toBeUndefined();
+  });
+
+  it('never locks out management: strict mode re-seeds an admin if none exists', async () => {
+    // Simulate the old lockout state: no admin users at all.
+    for (const a of (await ws.listUsers()).filter((u) => u.role === 'admin')) await ws.deleteUser(a.id);
+    await ws.setEnforcePermissions(true);
+    const admin = (await ws.listUsers()).find((u) => u.role === 'admin');
+    expect(admin).toBeTruthy();
+    expect(admin?.id).toBe('admin');
+    await expect(ws.assertAdmin('admin')).resolves.toBeUndefined();
+  });
+
+  it('hashes and verifies passwords for humans; agents have none', async () => {
+    const u = await ws.createUser({ id: 'xiaomo', kind: 'human', role: 'admin', password: 'secret' });
+    expect(u.passwordHash).toBeTruthy();
+    expect(u.passwordHash).not.toContain('secret');
+    expect(await ws.verifyUserPassword('xiaomo', 'secret')).toBe(true);
+    expect(await ws.verifyUserPassword('xiaomo', 'wrong')).toBe(false);
+    expect(await ws.verifyUserPassword('ghost', 'secret')).toBe(false);
+    // agent users have no password and cannot log in
+    const agent = await ws.createUser({ id: 'codex', kind: 'agent' });
+    expect(agent.passwordHash).toBeUndefined();
+    expect(await ws.verifyUserPassword('codex', 'anything')).toBe(false);
+    // setUserPassword resets it and clears mustChangePassword
+    await ws.setUserPassword('xiaomo', 'newsecret');
+    expect(await ws.verifyUserPassword('xiaomo', 'newsecret')).toBe(true);
+    expect(await ws.verifyUserPassword('xiaomo', 'secret')).toBe(false);
+    expect((await ws.getUser('xiaomo'))?.mustChangePassword ?? false).toBe(false);
   });
 
   it('leaves management open when permissions are off', async () => {

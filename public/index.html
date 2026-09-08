@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>NexPlan 项目管理</title>
+<title>NexPlan Project Management</title>
 <style>
   :root {
     --bg: #0f1117; --panel: #171a23; --panel2: #1e2230; --border: #2b3040;
@@ -37,6 +37,8 @@
   .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   .btn.danger { color: var(--red); border-color: var(--red); }
   .btn.sm { padding: 3px 9px; font-size: 12px; }
+  .lang { width: auto; background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 10px; border-radius: 8px; font-size: 13px; cursor: pointer; margin-left: 6px; }
   main { padding: 18px 20px; max-width: 1400px; margin: 0 auto; }
   .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
   .col { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px;
@@ -104,32 +106,44 @@
   table.admin { width: 100%; border-collapse: collapse; }
   table.admin th, table.admin td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
   table.admin th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  #toast { position: fixed; top: 16px; right: 16px; z-index: 999; max-width: 380px;
+    background: var(--panel2); border: 1px solid var(--red); color: var(--text); padding: 10px 14px;
+    border-radius: 8px; font-size: 13px; box-shadow: 0 4px 18px rgba(0,0,0,.4); display: none;
+    white-space: pre-wrap; }
+  #toast.show { display: block; }
 </style>
 </head>
 <body>
 <div class="top">
   <div class="brand">Nex<span>Plan</span></div>
-  <div class="proj"><span class="muted">项目</span><select id="project-select"></select></div>
+  <div class="proj"><span class="muted" data-i18n="proj_label">Project</span><select id="project-select"></select></div>
   <div class="chips" id="chips"></div>
   <div class="tabs">
-    <button class="tab active" data-tab="board">待办板</button>
-    <button class="tab" data-tab="bugs">缺陷</button>
-    <button class="tab" data-tab="docs">文档</button>
-    <button class="tab" data-tab="admin">管理</button>
+    <button class="tab active" data-tab="board" data-i18n="tab_board">Board</button>
+    <button class="tab" data-tab="bugs" data-i18n="tab_bugs">Bugs</button>
+    <button class="tab" data-tab="docs" data-i18n="tab_docs">Docs</button>
+    <button class="tab" data-tab="admin" data-i18n="tab_admin">Admin</button>
   </div>
-  <button class="btn" id="refresh">刷新</button>
+  <select id="lang-select" class="lang" aria-label="Language">
+    <option value="en">English</option>
+    <option value="zh">中文</option>
+  </select>
+  <button class="btn" id="login-btn">Log in</button>
+  <span class="muted" id="whoami" style="display:none"></span>
+  <button class="btn" id="logout-btn" style="display:none">Log out</button>
+  <button class="btn" id="refresh" data-i18n="refresh">Refresh</button>
 </div>
 
 <main>
   <!-- BOARD -->
   <section id="view-board">
     <div class="toolbar">
-      <input id="q" placeholder="搜索标题/描述…" />
-      <select id="filter-priority"><option value="">全部优先级</option>
+      <input id="q" data-i18n-ph="search_wi_ph" placeholder="Search title/description…" />
+      <select id="filter-priority"><option value="" data-i18n="all_priorities">All priorities</option>
         <option>P0</option><option>P1</option><option>P2</option><option>P3</option></select>
-      <select id="filter-assignee"><option value="">全部负责人</option></select>
+      <select id="filter-assignee"><option value="" data-i18n="all_assignees">All assignees</option></select>
       <div class="spacer"></div>
-      <button class="btn primary" id="new-item">+ 新建待办</button>
+      <button class="btn primary" id="new-item" data-i18n="new_item">+ New work item</button>
     </div>
     <div class="board" id="board"></div>
   </section>
@@ -137,13 +151,13 @@
   <!-- BUGS -->
   <section id="view-bugs" class="hidden">
     <div class="toolbar">
-      <input id="bq" placeholder="搜索缺陷…" />
-      <select id="b-severity"><option value="">全部级别</option>
+      <input id="bq" data-i18n-ph="search_bug_ph" placeholder="Search bugs…" />
+      <select id="b-severity"><option value="" data-i18n="all_severities">All severities</option>
         <option>critical</option><option>major</option><option>minor</option><option>trivial</option></select>
-      <select id="b-status"><option value="">全部状态</option>
+      <select id="b-status"><option value="" data-i18n="all_statuses">All statuses</option>
         <option>open</option><option>in_progress</option><option>fixed</option><option>verified</option><option>wontfix</option></select>
       <div class="spacer"></div>
-      <button class="btn primary" id="new-bug">+ 录入缺陷</button>
+      <button class="btn primary" id="new-bug" data-i18n="new_bug">+ Add bug</button>
     </div>
     <div class="panel" id="bug-list"></div>
   </section>
@@ -151,11 +165,11 @@
   <!-- DOCS -->
   <section id="view-docs" class="hidden">
     <div class="toolbar">
-      <button class="btn primary" id="new-doc">+ 新建文档</button>
+      <button class="btn primary" id="new-doc" data-i18n="new_doc">+ New doc</button>
     </div>
     <div class="grid2">
       <div class="panel" id="doc-list"></div>
-      <div class="panel" id="doc-view"><div class="empty">在左侧选择一个文档</div></div>
+      <div class="panel" id="doc-view"><div class="empty" data-i18n="doc_select_empty">Select a document on the left</div></div>
     </div>
   </section>
 
@@ -163,20 +177,20 @@
   <section id="view-admin" class="hidden">
     <div class="panel" style="margin-bottom:16px">
       <div class="row" style="justify-content:space-between">
-        <h2 style="margin:0">项目统计</h2>
-        <button class="btn" id="perm-toggle">权限：查看</button>
+        <h2 style="margin:0" data-i18n="project_stats">Project statistics</h2>
+        <button class="btn" id="perm-toggle">Permissions</button>
       </div>
       <div class="board" id="project-stats" style="margin-top:12px"></div>
     </div>
     <div class="grid2">
       <div class="panel">
-        <h2>项目</h2>
-        <button class="btn primary sm" id="new-project">+ 新建项目</button>
+        <h2 data-i18n="projects">Projects</h2>
+        <button class="btn primary sm" id="new-project" data-i18n="new_project">+ New project</button>
         <table class="admin" style="margin-top:10px" id="project-table"></table>
       </div>
       <div class="panel">
-        <h2>用户</h2>
-        <button class="btn primary sm" id="new-user">+ 添加用户</button>
+        <h2 data-i18n="users">Users</h2>
+        <button class="btn primary sm" id="new-user" data-i18n="new_user">+ Add user</button>
         <table class="admin" style="margin-top:10px" id="user-table"></table>
       </div>
     </div>
@@ -187,20 +201,145 @@
 <div class="modal-bg" id="modal-bg">
   <div class="modal" id="modal"></div>
 </div>
+<div id="toast"></div>
 
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// ---- i18n (English + Chinese globalization) ----
+const I18N = {
+  en: {
+    title: 'NexPlan Project Management',
+    proj_label: 'Project', tab_board: 'Board', tab_bugs: 'Bugs', tab_docs: 'Docs', tab_admin: 'Admin',
+    refresh: 'Refresh', search_wi_ph: 'Search title/description…',
+    all_priorities: 'All priorities', all_assignees: 'All assignees', new_item: '+ New work item',
+    search_bug_ph: 'Search bugs…', all_severities: 'All severities', all_statuses: 'All statuses',
+    new_bug: '+ Add bug', new_doc: '+ New doc', doc_select_empty: 'Select a document on the left',
+    project_stats: 'Project statistics', projects: 'Projects', new_project: '+ New project',
+    users: 'Users', new_user: '+ Add user',
+    st_backlog: 'Backlog', st_todo: 'Todo', st_in_progress: 'In progress', st_review: 'In review',
+    st_done: 'Done', st_blocked: 'Blocked',
+    chips_wi: 'Todo', chips_bugs: 'Bugs', chips_docs: 'Docs', board_empty: 'Empty',
+    w_status: 'Status', w_claim: 'Start / Claim', w_complete: 'Mark done', w_notes: 'Notes',
+    w_no_notes: 'No notes', w_note_ph: 'Add a note…', w_note_add: 'Add', close: 'Close',
+    claim_prompt: 'Assignee (agent or user):', complete_prompt: 'Completion note:',
+    bug_mark_fixed: 'Mark fixed', bug_empty: 'No bugs', bug_severity: 'Severity',
+    bug_status: 'Status', bug_evidence: 'Evidence', save: 'Save',
+    doc_empty: 'No documents', doc_edit: 'Edit (creates new version)', doc_approve: 'Mark approved',
+    doc_history: 'Version history', doc_no_versions: 'No versions',
+    doc_edit_title: 'Edit document (creates a new version)', doc_content: 'Markdown content',
+    cancel: 'Cancel', doc_save_version: 'Save as new version',
+    stat_todo: 'Todo', stat_inprog: 'In progress', stat_done: 'Done', stat_bugs: 'Bugs',
+    stat_docs: 'Docs', stat_members: 'Members', stat_empty: 'No data',
+    perm_prefix: 'Permissions: ', perm_strict: 'Strict (on)', perm_loose: 'Loose (default)',
+    col_name: 'Name', col_members: 'Members', col_del: 'Delete', set_default: 'Set as default',
+    confirm_del_proj: 'Delete project {x}?', confirm_del_user: 'Delete user {x}?',
+    form_new_item: 'New work item', form_title: 'Title', form_type: 'Type', form_priority: 'Priority',
+    form_tags: 'Tags (comma-separated)', form_desc: 'Description', create: 'Create',
+    alert_title: 'Please enter a title', form_new_bug: 'Add bug',
+    form_evidence: 'Evidence (stack/log)', form_new_doc: 'New document',
+    form_new_project: 'New project', form_key: 'Key (e.g. api)', form_name: 'Name',
+    form_desc_lbl: 'Description', form_members: 'Members (user IDs, comma-separated; empty = public)',
+    alert_key: 'Please enter a key', form_new_user: 'Add user', form_id: 'ID (e.g. claude-code)',
+    form_role: 'Role', add: 'Add', alert_id: 'Please enter an ID',
+    login: 'Log in', logout: 'Log out', login_title: 'Log in',
+    login_id: 'ID', login_password: 'Password', login_hint: 'Enter your login credentials',
+    change_password_title: 'Change password', new_password: 'New password',
+    password_required: 'Password required', form_password: 'Password (optional)',
+  },
+  zh: {
+    title: 'NexPlan 项目管理',
+    proj_label: '项目', tab_board: '待办板', tab_bugs: '缺陷', tab_docs: '文档', tab_admin: '管理',
+    refresh: '刷新', search_wi_ph: '搜索标题/描述…',
+    all_priorities: '全部优先级', all_assignees: '全部负责人', new_item: '+ 新建待办',
+    search_bug_ph: '搜索缺陷…', all_severities: '全部级别', all_statuses: '全部状态',
+    new_bug: '+ 录入缺陷', new_doc: '+ 新建文档', doc_select_empty: '在左侧选择一个文档',
+    project_stats: '项目统计', projects: '项目', new_project: '+ 新建项目',
+    users: '用户', new_user: '+ 添加用户',
+    st_backlog: '待办', st_todo: '待开始', st_in_progress: '进行中', st_review: '评审中',
+    st_done: '完成', st_blocked: '阻塞',
+    chips_wi: '待办', chips_bugs: '缺陷', chips_docs: '文档', board_empty: '空',
+    w_status: '状态', w_claim: '开始 / 认领', w_complete: '标记完成', w_notes: '备注',
+    w_no_notes: '暂无备注', w_note_ph: '添加备注…', w_note_add: '添加', close: '关闭',
+    claim_prompt: '认领人（agent 或 user）：', complete_prompt: '完成备注：',
+    bug_mark_fixed: '标记已修', bug_empty: '暂无缺陷', bug_severity: '级别',
+    bug_status: '状态', bug_evidence: '证据', save: '保存',
+    doc_empty: '暂无文档', doc_edit: '编辑（生成新版本）', doc_approve: '标记评审通过',
+    doc_history: '版本历史', doc_no_versions: '暂无版本',
+    doc_edit_title: '编辑文档（将创建新版本）', doc_content: 'Markdown 内容',
+    cancel: '取消', doc_save_version: '保存为新版本',
+    stat_todo: '待办', stat_inprog: '进行中', stat_done: '已完成', stat_bugs: '缺陷',
+    stat_docs: '文档', stat_members: '成员', stat_empty: '暂无数据',
+    perm_prefix: '权限：', perm_strict: '严格（已开启）', perm_loose: '宽松（默认）',
+    col_name: '名称', col_members: '成员', col_del: '删除', set_default: '设为默认',
+    confirm_del_proj: '删除项目 {x} ？', confirm_del_user: '删除用户 {x} ？',
+    form_new_item: '新建待办', form_title: '标题', form_type: '类型', form_priority: '优先级',
+    form_tags: '标签（逗号分隔）', form_desc: '描述', create: '创建',
+    alert_title: '请输入标题', form_new_bug: '录入缺陷',
+    form_evidence: '证据（堆栈/日志）', form_new_doc: '新建文档',
+    form_new_project: '新建项目', form_key: 'Key（如 api）', form_name: '名称',
+    form_desc_lbl: '描述', form_members: '成员（用户 ID，逗号分隔；留空=公开）',
+    alert_key: '请输入 key', form_new_user: '添加用户', form_id: 'ID（如 claude-code）',
+    form_role: '角色', add: '添加', alert_id: '请输入 ID',
+    login: '登录', logout: '退出', login_title: '登录',
+    login_id: 'ID', login_password: '密码', login_hint: '请输入登录凭据',
+    change_password_title: '修改密码', new_password: '新密码',
+    password_required: '请输入密码', form_password: '密码（可选）',
+  }
+};
+
+const LS_LANG = 'nexplan_lang';
+const detectLang = () => {
+  const saved = localStorage.getItem(LS_LANG);
+  if (saved === 'en' || saved === 'zh') return saved;
+  return (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+};
+let lang = detectLang();
+const t = (key) => (I18N[lang] && I18N[lang][key]) || I18N.en[key] || key;
+const statusLabel = (s) => (I18N.en['st_' + s] ? t('st_' + s) : s);
+const fmt = (key, vars) => { let s = t(key); for (const k in (vars || {})) s = s.replace('{' + k + '}', vars[k]); return s; };
+function applyI18n() {
+  document.title = t('title');
+  document.querySelectorAll('[data-i18n]').forEach(el => { const v = t(el.getAttribute('data-i18n')); if (v) el.textContent = v; });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => { const v = t(el.getAttribute('data-i18n-ph')); if (v) el.setAttribute('placeholder', v); });
+}
+function setLang(next) {
+  if (next !== 'en' && next !== 'zh') return;
+  lang = next;
+  localStorage.setItem(LS_LANG, next);
+  document.documentElement.lang = next === 'zh' ? 'zh-CN' : 'en';
+  const sel = $('#lang-select'); if (sel) sel.value = next;
+  applyI18n();
+  renderAuth();
+  refresh();
+}
+
 let project = 'default';
 const withProject = (u) => u + (u.includes('?') ? '&' : '?') + 'project=' + encodeURIComponent(project);
+
+// Surface API/validation errors as a toast instead of failing silently.
+let toastTimer = null;
+function notify(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 5000);
+}
+function notifyError(e) {
+  const msg = (e && e.message) || String(e);
+  console.error(msg);
+  notify('Error: ' + msg);
+}
+
 const api = {
-  get: (u) => fetch(u).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
-  send: (u, method, body) => fetch(u, { method, headers: {'Content-Type':'application/json'},
-    body: JSON.stringify(body || {}) }).then(r => { if (!r.ok) return r.json().then(x => { throw new Error(x.error || r.statusText); }); return r.json(); }),
+  get: (u) => fetch(u, { credentials: 'same-origin' }).then(r => { if (!r.ok) return r.json().then(x => { throw new Error(x.error || r.statusText); }); return r.json(); }).catch(e => { notifyError(e); throw e; }),
+  send: (u, method, body) => fetch(u, { method, credentials: 'same-origin', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body || {}) }).then(r => { if (!r.ok) return r.json().then(x => { throw new Error(x.error || r.statusText); }); return r.json(); }).catch(e => { notifyError(e); throw e; }),
 };
 let board = {};
 const STATUSES = ['backlog','todo','in_progress','review','done','blocked'];
-const STATUS_LABEL = { backlog:'待办', todo:'待开始', in_progress:'进行中', review:'评审中', done:'完成', blocked:'阻塞' };
 const STATUS_ORDER = ['open','in_progress','fixed','verified','wontfix','reopened'];
 
 async function initProjects() {
@@ -218,10 +357,10 @@ async function loadSummary() {
   const wTotal = keys.reduce((a,[k,v]) => a+v, 0);
   const bTotal = board.bugs ? Object.values(board.bugs).reduce((a,v)=>a+v,0) : 0;
   $('#chips').innerHTML =
-    `<span class="chip">待办 <b>${wTotal}</b></span>` +
-    keys.map(([k,v]) => `<span class="chip">${STATUS_LABEL[k]||k} <b>${v}</b></span>`).join('') +
-    `<span class="chip">缺陷 <b>${bTotal}</b></span>` +
-    `<span class="chip">文档 <b>${board.docs||0}</b></span>`;
+    `<span class="chip">${t('chips_wi')} <b>${wTotal}</b></span>` +
+    keys.map(([k,v]) => `<span class="chip">${statusLabel(k)} <b>${v}</b></span>`).join('') +
+    `<span class="chip">${t('chips_bugs')} <b>${bTotal}</b></span>` +
+    `<span class="chip">${t('chips_docs')} <b>${board.docs||0}</b></span>`;
 }
 
 async function loadBoard() {
@@ -236,12 +375,12 @@ async function loadBoard() {
   const byStatus = {};
   for (const s of STATUSES) byStatus[s] = items.filter(i => i.status === s);
   const assignees = [...new Set(items.map(i => i.assignee).filter(Boolean))];
-  $('#filter-assignee').innerHTML = '<option value="">全部负责人</option>' +
+  $('#filter-assignee').innerHTML = '<option value="">' + t('all_assignees') + '</option>' +
     assignees.map(a => `<option value="${esc(a)}">@${esc(a)}</option>`).join('');
   $('#board').innerHTML = STATUSES.map(s => `
     <div class="col">
-      <h3>${STATUS_LABEL[s]} <span class="count">${byStatus[s].length}</span></h3>
-      ${byStatus[s].map(cardHtml).join('') || '<div class="empty">空</div>'}
+      <h3>${statusLabel(s)} <span class="count">${byStatus[s].length}</span></h3>
+      ${byStatus[s].map(cardHtml).join('') || `<div class="empty">${t('board_empty')}</div>`}
     </div>`).join('');
   bindCards();
 }
@@ -271,35 +410,35 @@ async function openItem(id) {
     <h3>${esc(i.id)} · ${esc(i.title)}</h3>
     <div class="row" style="margin-bottom:10px">
       <span class="badge pri-${esc(i.priority)}">${esc(i.priority)}</span>
-      <span class="st ${esc(i.status)}">${STATUS_LABEL[i.status]||i.status}</span>
+      <span class="st ${esc(i.status)}">${statusLabel(i.status)}</span>
       <span class="muted">${esc(i.type)}</span>
       ${i.assignee ? `<span class="assignee">@${esc(i.assignee)}</span>` : ''}
     </div>
     ${i.description ? `<p class="muted">${esc(i.description)}</p>` : ''}
     <div class="row">
-      <label style="margin:0">状态</label>
-      <select id="w-status">${STATUSES.map(s => `<option value="${s}" ${s===i.status?'selected':''}>${STATUS_LABEL[s]}</option>`).join('')}</select>
-      <button class="btn sm" id="w-claim">开始 / 认领</button>
-      <button class="btn sm primary" id="w-complete">标记完成</button>
+      <label style="margin:0">${t('w_status')}</label>
+      <select id="w-status">${STATUSES.map(s => `<option value="${s}" ${s===i.status?'selected':''}>${statusLabel(s)}</option>`).join('')}</select>
+      <button class="btn sm" id="w-claim">${t('w_claim')}</button>
+      <button class="btn sm primary" id="w-complete">${t('w_complete')}</button>
     </div>
-    <label>备注</label>
-    <div id="w-notes">${(i.notes||[]).map(n => `<div class="note">${esc(n.body)} <span class="who">— ${esc(n.author)} ${esc(new Date(n.at).toLocaleString())}</span></div>`).join('') || '<div class="empty">暂无备注</div>'}</div>
+    <label>${t('w_notes')}</label>
+    <div id="w-notes">${(i.notes||[]).map(n => `<div class="note">${esc(n.body)} <span class="who">— ${esc(n.author)} ${esc(new Date(n.at).toLocaleString())}</span></div>`).join('') || `<div class="empty">${t('w_no_notes')}</div>`}</div>
     <div class="row" style="margin-top:10px">
-      <input type="text" id="note-input" placeholder="添加备注…" />
-      <button class="btn" id="note-add">添加</button>
+      <input type="text" id="note-input" placeholder="${t('w_note_ph')}" />
+      <button class="btn" id="note-add">${t('w_note_add')}</button>
     </div>
-    <div class="row" style="margin-top:16px"><button class="btn" id="w-close">关闭</button></div>`;
+    <div class="row" style="margin-top:16px"><button class="btn" id="w-close">${t('close')}</button></div>`;
   $('.modal-bg').classList.add('open');
   $('#w-status').onchange = async (e) => {
     await api.send('/api/workitems/' + id + '?project=' + encodeURIComponent(project), 'PATCH', { status: e.target.value, author: 'user' });
     await refresh();
   };
   $('#w-claim').onclick = async () => {
-    const asg = prompt('认领人（agent 或 user）：','user');
+    const asg = prompt(t('claim_prompt'),'user');
     if (asg) { await api.send(`/api/workitems/${id}/claim?project=${encodeURIComponent(project)}`, 'POST', { assignee: asg }); await refresh(); }
   };
   $('#w-complete').onclick = async () => {
-    const note = prompt('完成备注：','');
+    const note = prompt(t('complete_prompt'),'');
     await api.send(`/api/workitems/${id}/complete?project=${encodeURIComponent(project)}`, 'POST', { note: note || '', author: 'user' });
     await refresh();
   };
@@ -341,10 +480,10 @@ async function loadBugs() {
         <b>${esc(b.title)}</b>
         ${b.foundByAgent ? `<span class="assignee">by ${esc(b.foundByAgent)}</span>` : ''}
         <div class="spacer" style="flex:1"></div>
-        ${b.status !== 'fixed' && b.status !== 'verified' ? `<button class="btn sm" data-fix="${esc(b.id)}">标记已修</button>` : ''}
+        ${b.status !== 'fixed' && b.status !== 'verified' ? `<button class="btn sm" data-fix="${esc(b.id)}">${t('bug_mark_fixed')}</button>` : ''}
       </div>
       ${b.evidence ? `<div class="muted" style="font-size:12px;margin-top:4px;font-family:monospace">${esc(b.evidence.slice(0,160))}</div>` : ''}
-    </div>`).join('') || '<div class="empty">暂无缺陷</div>';
+    </div>`).join('') || `<div class="empty">${t('bug_empty')}</div>`;
   document.querySelectorAll('[data-fix]').forEach(btn => {
     btn.onclick = async (e) => {
       e.stopPropagation();
@@ -369,12 +508,12 @@ async function openBug(id) {
       <span class="st ${esc(b.status)}">${esc(b.status)}</span>
       <span class="muted">${esc(b.foundBy)}${b.foundByAgent ? ' by '+esc(b.foundByAgent) : ''}</span>
     </div>
-    <label>级别</label><select id="b-sev">${['critical','major','minor','trivial'].map(s => `<option ${s===b.severity?'selected':''}>${s}</option>`).join('')}</select>
-    <label>状态</label><select id="b-st">${STATUS_ORDER.map(s => `<option ${s===b.status?'selected':''}>${s}</option>`).join('')}</select>
+    <label>${t('bug_severity')}</label><select id="b-sev">${['critical','major','minor','trivial'].map(s => `<option ${s===b.severity?'selected':''}>${s}</option>`).join('')}</select>
+    <label>${t('bug_status')}</label><select id="b-st">${STATUS_ORDER.map(s => `<option ${s===b.status?'selected':''}>${s}</option>`).join('')}</select>
     ${b.description ? `<p class="muted" style="margin-top:10px">${esc(b.description)}</p>` : ''}
-    ${b.evidence ? `<label>证据</label><div class="doc-body">${esc(b.evidence)}</div>` : ''}
-    <div class="row" style="margin-top:14px"><button class="btn" id="b-close">关闭</button>
-      <button class="btn primary" id="b-save">保存</button></div>`;
+    ${b.evidence ? `<label>${t('bug_evidence')}</label><div class="doc-body">${esc(b.evidence)}</div>` : ''}
+    <div class="row" style="margin-top:14px"><button class="btn" id="b-close">${t('close')}</button>
+      <button class="btn primary" id="b-save">${t('save')}</button></div>`;
   $('.modal-bg').classList.add('open');
   $('#b-close').onclick = closeModal;
   $('#b-save').onclick = async () => {
@@ -389,7 +528,7 @@ async function loadDocsList() {
   $('#doc-list').innerHTML = docs.map(d => `
     <div class="list-item" data-slug="${esc(d.slug)}">${esc(d.slug)} <span class="muted">v${d.meta.version}</span>
       <span class="st">${d.meta.status}</span> <span class="muted">[${d.meta.type}]</span>
-      <div style="margin-top:2px" class="muted">${esc(d.meta.title)}</div></div>`).join('') || '<div class="empty">暂无文档</div>';
+      <div style="margin-top:2px" class="muted">${esc(d.meta.title)}</div></div>`).join('') || `<div class="empty">${t('doc_empty')}</div>`;
   document.querySelectorAll('#doc-list .list-item').forEach(el => {
     el.onclick = () => openDoc(el.dataset.slug);
   });
@@ -407,12 +546,12 @@ async function openDoc(slug) {
       <span class="st">${esc(d.meta.status)}</span>
     </div>
     <div class="row" style="margin:10px 0">
-      <button class="btn sm" id="doc-edit">编辑（生成新版本）</button>
-      <button class="btn sm" id="doc-status">标记评审通过</button>
+      <button class="btn sm" id="doc-edit">${t('doc_edit')}</button>
+      <button class="btn sm" id="doc-status">${t('doc_approve')}</button>
     </div>
     <div class="doc-body" id="doc-content">${esc(d.content)}</div>
-    <h3 style="margin:16px 0 8px">版本历史</h3>
-    <div class="doc-body" style="min-height:auto">${hist.map(v => `v${v.version} · ${v.sha.slice(0,8)} · ${esc(v.author)} · ${esc(new Date(v.date).toLocaleString())}<br>${esc(v.message)}`).join('<br><br>') || '暂无版本'}</div>`;
+    <h3 style="margin:16px 0 8px">${t('doc_history')}</h3>
+    <div class="doc-body" style="min-height:auto">${hist.map(v => `v${v.version} · ${v.sha.slice(0,8)} · ${esc(v.author)} · ${esc(new Date(v.date).toLocaleString())}<br>${esc(v.message)}`).join('<br><br>') || t('doc_no_versions')}</div>`;
   $('#doc-edit').onclick = () => editDoc(slug, d.content);
   $('#doc-status').onclick = async () => {
     await api.send('/api/docs/' + s + '?' + q, 'PATCH', { status: 'approved', author: 'user' });
@@ -423,11 +562,11 @@ async function openDoc(slug) {
 function editDoc(slug, content) {
   const modal = $('#modal');
   modal.innerHTML = `
-    <h3>编辑文档（将创建新版本）</h3>
-    <label>Markdown 内容</label>
+    <h3>${t('doc_edit_title')}</h3>
+    <label>${t('doc_content')}</label>
     <textarea id="doc-body">${esc(content)}</textarea>
-    <div class="row" style="margin-top:12px"><button class="btn" id="doc-cancel">取消</button>
-      <button class="btn primary" id="doc-save">保存为新版本</button></div>`;
+    <div class="row" style="margin-top:12px"><button class="btn" id="doc-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="doc-save">${t('doc_save_version')}</button></div>`;
   $('.modal-bg').classList.add('open');
   $('#doc-cancel').onclick = closeModal;
   $('#doc-save').onclick = async () => {
@@ -451,50 +590,50 @@ async function loadAdmin() {
     const memberCount = (p.members||[]).length;
     return `<div class="col" data-key="${esc(p.key)}" style="cursor:pointer">
       <h3>${esc(p.key)} <span class="count">${esc(p.name)}</span></h3>
-      <div class="card"><div class="title">待办 <b>${backlog}</b> · 进行中 <b>${inprog}</b> · 已完成 <b>${done}</b></div>
-        <div class="meta"><span class="badge sev-critical">缺陷 ${openBugs}</span><span class="muted">文档 ${s.docs||0}</span><span class="muted">成员 ${memberCount}</span></div></div>
+      <div class="card"><div class="title">${t('stat_todo')} <b>${backlog}</b> · ${t('stat_inprog')} <b>${inprog}</b> · ${t('stat_done')} <b>${done}</b></div>
+        <div class="meta"><span class="badge sev-critical">${t('stat_bugs')} ${openBugs}</span><span class="muted">${t('stat_docs')} ${s.docs||0}</span><span class="muted">${t('stat_members')} ${memberCount}</span></div></div>
     </div>`;
-  }).join('') || '<div class="empty">暂无数据</div>';
+  }).join('') || `<div class="empty">${t('stat_empty')}</div>`;
   document.querySelectorAll('#project-stats .col').forEach(c => c.onclick = () => {
     project = c.dataset.key; $('#project-select').value = project; showTab('board');
   });
 
   // Permission toggle button.
   const pt = $('#perm-toggle');
-  pt.textContent = '权限：' + (w.enforcePermissions ? '严格（已开启）' : '宽松（默认）');
+  pt.textContent = t('perm_prefix') + (w.enforcePermissions ? t('perm_strict') : t('perm_loose'));
   pt.onclick = async () => {
     const next = !w.enforcePermissions;
     await api.send('/api/workspace/enforce-permissions', 'POST', { value: next });
     await loadAdmin(); await refresh();
   };
 
-  $('#project-table').innerHTML = `<tr><th>Key</th><th>名称</th><th>成员</th><th></th></tr>` +
+  $('#project-table').innerHTML = `<tr><th>Key</th><th>${t('col_name')}</th><th>${t('col_members')}</th><th></th></tr>` +
     projects.map(p => `<tr>
       <td>${esc(p.key)}${p.key===w.currentProject ? ' <span class="st">default</span>' : ''}</td>
       <td>${esc(p.name)}</td><td>${esc((p.members||[]).join(', '))||'-'}</td>
       <td style="white-space:nowrap">
-        ${p.key!=='default' ? `<button class="btn sm" data-del-proj="${esc(p.key)}">删除</button>` : ''}
-        ${p.key!==w.currentProject ? `<button class="btn sm" data-use-proj="${esc(p.key)}">设为默认</button>` : ''}
+        ${p.key!=='default' ? `<button class="btn sm" data-del-proj="${esc(p.key)}">${t('col_del')}</button>` : ''}
+        ${p.key!==w.currentProject ? `<button class="btn sm" data-use-proj="${esc(p.key)}">${t('set_default')}</button>` : ''}
       </td></tr>`).join('');
   document.querySelectorAll('[data-del-proj]').forEach(b => b.onclick = async () => {
-    if (confirm('删除项目 ' + b.dataset.delProj + ' ？')) { await api.send('/api/projects/' + encodeURIComponent(b.dataset.delProj), 'DELETE'); await refresh(); }
+    if (confirm(fmt('confirm_del_proj', { x: b.dataset.delProj }))) { await api.send('/api/projects/' + encodeURIComponent(b.dataset.delProj), 'DELETE'); await refresh(); }
   });
   document.querySelectorAll('[data-use-proj]').forEach(b => b.onclick = async () => {
     await api.send('/api/workspace/default-project', 'POST', { key: b.dataset.useProj });
     await initProjects(); await refresh();
   });
 
-  $('#user-table').innerHTML = `<tr><th>ID</th><th>名称</th><th>类型</th><th>角色</th><th></th></tr>` +
+  $('#user-table').innerHTML = `<tr><th>ID</th><th>${t('col_name')}</th><th>Type</th><th>Role</th><th></th></tr>` +
     users.map(u => `<tr>
       <td>${esc(u.id)}</td><td>${esc(u.name)}</td><td>${u.kind}</td>
       <td><select class="role" data-user="${esc(u.id)}">${['admin','member','viewer'].map(r => `<option ${r===u.role?'selected':''}>${r}</option>`).join('')}</select></td>
-      <td><button class="btn sm danger" data-del-user="${esc(u.id)}">删除</button></td></tr>`).join('');
+      <td><button class="btn sm danger" data-del-user="${esc(u.id)}">${t('col_del')}</button></td></tr>`).join('');
   document.querySelectorAll('.role').forEach(sel => sel.onchange = async () => {
     await api.send('/api/users/' + encodeURIComponent(sel.dataset.user), 'PATCH', { role: sel.value });
     await loadAdmin();
   });
   document.querySelectorAll('[data-del-user]').forEach(b => b.onclick = async () => {
-    if (confirm('删除用户 ' + b.dataset.delUser + ' ？')) { await api.send('/api/users/' + encodeURIComponent(b.dataset.delUser), 'DELETE'); await loadAdmin(); }
+    if (confirm(fmt('confirm_del_user', { x: b.dataset.delUser }))) { await api.send('/api/users/' + encodeURIComponent(b.dataset.delUser), 'DELETE'); await loadAdmin(); }
   });
 }
 
@@ -504,18 +643,18 @@ function closeModalX() { $('.modal-bg').classList.remove('open'); }
 
 function newItemForm() {
   modalShell(`
-    <h3>新建待办</h3>
-    <label>标题</label><input type="text" id="n-title" />
-    <label>类型</label><select id="n-type">${['task','feature','refactor','chore','research','docs'].map(t=>`<option>${t}</option>`).join('')}</select>
-    <div class="row"><div style="flex:1"><label>优先级</label><select id="n-pri">${['P0','P1','P2','P3'].map(p=>`<option>${p}</option>`).join('')}</select></div>
-      <div style="flex:1"><label>标签（逗号分隔）</label><input type="text" id="n-tags" /></div></div>
-    <label>描述</label><textarea id="n-desc"></textarea>
-    <div class="row" style="margin-top:12px"><button class="btn" id="n-cancel">取消</button>
-      <button class="btn primary" id="n-save">创建</button></div>`);
+    <h3>${t('form_new_item')}</h3>
+    <label>${t('form_title')}</label><input type="text" id="n-title" />
+    <label>${t('form_type')}</label><select id="n-type">${['task','feature','refactor','chore','research','docs'].map(t2=>`<option>${t2}</option>`).join('')}</select>
+    <div class="row"><div style="flex:1"><label>${t('form_priority')}</label><select id="n-pri">${['P0','P1','P2','P3'].map(p=>`<option>${p}</option>`).join('')}</select></div>
+      <div style="flex:1"><label>${t('form_tags')}</label><input type="text" id="n-tags" /></div></div>
+    <label>${t('form_desc')}</label><textarea id="n-desc"></textarea>
+    <div class="row" style="margin-top:12px"><button class="btn" id="n-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="n-save">${t('create')}</button></div>`);
   $('#n-cancel').onclick = closeModalX;
   $('#n-save').onclick = async () => {
     const title = $('#n-title').value.trim();
-    if (!title) return alert('请输入标题');
+    if (!title) return alert(t('alert_title'));
     await api.send('/api/workitems?project=' + encodeURIComponent(project), 'POST', { title, type: $('#n-type').value, priority: $('#n-pri').value,
       tags: $('#n-tags').value.split(',').map(t=>t.trim()).filter(Boolean), description: $('#n-desc').value, author: 'user' });
     closeModalX(); await refresh();
@@ -524,18 +663,18 @@ function newItemForm() {
 
 function newBugForm() {
   modalShell(`
-    <h3>录入缺陷</h3>
-    <label>标题</label><input type="text" id="b-title" />
-    <div class="row"><div style="flex:1"><label>级别</label><select id="b-sev">${['critical','major','minor','trivial'].map(s=>`<option>${s}</option>`).join('')}</select></div>
-      <div style="flex:1"><label>标签</label><input type="text" id="b-tags" /></div></div>
-    <label>证据（堆栈/日志）</label><textarea id="b-evidence"></textarea>
-    <label>描述</label><textarea id="b-desc"></textarea>
-    <div class="row" style="margin-top:12px"><button class="btn" id="b-cancel">取消</button>
-      <button class="btn primary" id="b-save">创建</button></div>`);
+    <h3>${t('form_new_bug')}</h3>
+    <label>${t('form_title')}</label><input type="text" id="b-title" />
+    <div class="row"><div style="flex:1"><label>${t('bug_severity')}</label><select id="b-sev">${['critical','major','minor','trivial'].map(s=>`<option>${s}</option>`).join('')}</select></div>
+      <div style="flex:1"><label>${t('form_tags')}</label><input type="text" id="b-tags" /></div></div>
+    <label>${t('form_evidence')}</label><textarea id="b-evidence"></textarea>
+    <label>${t('form_desc')}</label><textarea id="b-desc"></textarea>
+    <div class="row" style="margin-top:12px"><button class="btn" id="b-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="b-save">${t('create')}</button></div>`);
   $('#b-cancel').onclick = closeModalX;
   $('#b-save').onclick = async () => {
     const title = $('#b-title').value.trim();
-    if (!title) return alert('请输入标题');
+    if (!title) return alert(t('alert_title'));
     await api.send('/api/bugs?project=' + encodeURIComponent(project), 'POST', { title, severity: $('#b-sev').value,
       evidence: $('#b-evidence').value, description: $('#b-desc').value,
       tags: $('#b-tags').value.split(',').map(t=>t.trim()).filter(Boolean), author: 'user' });
@@ -545,17 +684,17 @@ function newBugForm() {
 
 function newDocForm() {
   modalShell(`
-    <h3>新建文档</h3>
-    <label>标题</label><input type="text" id="d-title" />
-    <div class="row"><div style="flex:1"><label>类型</label><select id="d-type">${['design','decision','adr','architecture','notes'].map(t=>`<option>${t}</option>`).join('')}</select></div>
-      <div style="flex:1"><label>标签</label><input type="text" id="d-tags" /></div></div>
-    <label>Markdown 内容</label><textarea id="d-body"></textarea>
-    <div class="row" style="margin-top:12px"><button class="btn" id="d-cancel">取消</button>
-      <button class="btn primary" id="d-save">创建</button></div>`);
+    <h3>${t('form_new_doc')}</h3>
+    <label>${t('form_title')}</label><input type="text" id="d-title" />
+    <div class="row"><div style="flex:1"><label>${t('form_type')}</label><select id="d-type">${['design','decision','adr','architecture','notes'].map(t2=>`<option>${t2}</option>`).join('')}</select></div>
+      <div style="flex:1"><label>${t('form_tags')}</label><input type="text" id="d-tags" /></div></div>
+    <label>${t('doc_content')}</label><textarea id="d-body"></textarea>
+    <div class="row" style="margin-top:12px"><button class="btn" id="d-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="d-save">${t('create')}</button></div>`);
   $('#d-cancel').onclick = closeModalX;
   $('#d-save').onclick = async () => {
     const title = $('#d-title').value.trim();
-    if (!title) return alert('请输入标题');
+    if (!title) return alert(t('alert_title'));
     const d = await api.send('/api/docs?project=' + encodeURIComponent(project), 'POST', { title, type: $('#d-type').value,
       tags: $('#d-tags').value.split(',').map(t=>t.trim()).filter(Boolean), body: $('#d-body').value, author: 'user' });
     closeModalX(); await showTab('docs'); await refresh(); await openDoc(d.slug);
@@ -564,17 +703,17 @@ function newDocForm() {
 
 function newProjectForm() {
   modalShell(`
-    <h3>新建项目</h3>
-    <label>Key（如 api）</label><input type="text" id="p-key" />
-    <label>名称</label><input type="text" id="p-name" />
-    <label>描述</label><input type="text" id="p-desc" />
-    <label>成员（用户 ID，逗号分隔；留空=公开）</label><input type="text" id="p-members" placeholder="alice,claude-code" />
-    <div class="row" style="margin-top:12px"><button class="btn" id="p-cancel">取消</button>
-      <button class="btn primary" id="p-save">创建</button></div>`);
+    <h3>${t('form_new_project')}</h3>
+    <label>${t('form_key')}</label><input type="text" id="p-key" />
+    <label>${t('form_name')}</label><input type="text" id="p-name" />
+    <label>${t('form_desc_lbl')}</label><input type="text" id="p-desc" />
+    <label>${t('form_members')}</label><input type="text" id="p-members" placeholder="alice,claude-code" />
+    <div class="row" style="margin-top:12px"><button class="btn" id="p-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="p-save">${t('create')}</button></div>`);
   $('#p-cancel').onclick = closeModalX;
   $('#p-save').onclick = async () => {
     const key = $('#p-key').value.trim();
-    if (!key) return alert('请输入 key');
+    if (!key) return alert(t('alert_key'));
     const members = $('#p-members').value.split(',').map(t=>t.trim()).filter(Boolean);
     await api.send('/api/projects', 'POST', { key, name: $('#p-name').value || key, description: $('#p-desc').value, members });
     closeModalX(); await initProjects(); await showTab('admin'); await loadAdmin();
@@ -583,19 +722,90 @@ function newProjectForm() {
 
 function newUserForm() {
   modalShell(`
-    <h3>添加用户</h3>
-    <label>ID（如 claude-code）</label><input type="text" id="u-id" />
-    <label>名称</label><input type="text" id="u-name" />
-    <div class="row"><div style="flex:1"><label>类型</label><select id="u-kind">${['human','agent'].map(k=>`<option>${k}</option>`).join('')}</select></div>
-      <div style="flex:1"><label>角色</label><select id="u-role">${['admin','member','viewer'].map(r=>`<option>${r}</option>`).join('')}</select></div></div>
-    <div class="row" style="margin-top:12px"><button class="btn" id="u-cancel">取消</button>
-      <button class="btn primary" id="u-save">添加</button></div>`);
+    <h3>${t('form_new_user')}</h3>
+    <label>${t('form_id')}</label><input type="text" id="u-id" />
+    <label>${t('form_name')}</label><input type="text" id="u-name" />
+    <div class="row"><div style="flex:1"><label>${t('form_type')}</label><select id="u-kind">${['human','agent'].map(k=>`<option>${k}</option>`).join('')}</select></div>
+      <div style="flex:1"><label>${t('form_role')}</label><select id="u-role">${['admin','member','viewer'].map(r=>`<option>${r}</option>`).join('')}</select></div></div>
+    <label>${t('form_password')}</label><input type="password" id="u-password" autocomplete="new-password" />
+    <div class="row" style="margin-top:12px"><button class="btn" id="u-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="u-save">${t('add')}</button></div>`);
   $('#u-cancel').onclick = closeModalX;
   $('#u-save').onclick = async () => {
     const id = $('#u-id').value.trim();
-    if (!id) return alert('请输入 ID');
-    await api.send('/api/users', 'POST', { id, name: $('#u-name').value || id, kind: $('#u-kind').value, role: $('#u-role').value });
+    if (!id) return alert(t('alert_id'));
+    await api.send('/api/users', 'POST', { id, name: $('#u-name').value || id, kind: $('#u-kind').value, role: $('#u-role').value, password: $('#u-password').value || undefined });
     closeModalX(); await loadAdmin();
+  };
+}
+
+// ---------------- auth ----------------
+let currentUser = null;
+function renderAuth() {
+  const li = $('#login-btn'), who = $('#whoami'), lo = $('#logout-btn');
+  li.textContent = t('login');
+  if (currentUser) {
+    li.style.display = 'none';
+    who.style.display = 'inline-flex';
+    who.textContent = `${currentUser.name} (${currentUser.role})`;
+    lo.style.display = 'inline-flex';
+  } else {
+    li.style.display = 'inline-flex';
+    li.classList.add('primary');
+    who.style.display = 'none';
+    lo.style.display = 'none';
+  }
+}
+async function checkAuth() {
+  try {
+    const r = await api.get('/api/auth/me');
+    currentUser = r && r.user ? r.user : null;
+  } catch {
+    currentUser = null;
+  }
+  renderAuth();
+  return currentUser;
+}
+
+function loginForm() {
+  modalShell(`
+    <h3>${t('login_title')}</h3>
+    <label>${t('login_id')}</label><input type="text" id="login-id" autocomplete="username" />
+    <label>${t('login_password')}</label><input type="password" id="login-password" autocomplete="current-password" />
+    <div class="row" style="margin-top:12px"><button class="btn" id="login-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="login-submit">${t('login')}</button></div>`);
+  $('#login-cancel').onclick = closeModalX;
+  $('#login-submit').onclick = async () => {
+    const id = $('#login-id').value.trim();
+    const pw = $('#login-password').value;
+    if (!id || !pw) return notifyError(t('password_required'));
+    try {
+      const r = await api.send('/api/auth/login', 'POST', { id, password: pw });
+      currentUser = r.user;
+      closeModalX();
+      renderAuth();
+      if (r.user && r.user.mustChangePassword) changePasswordForm();
+      else refresh();
+    } catch (e) { /* error toasted by api.send */ }
+  };
+}
+
+function changePasswordForm() {
+  modalShell(`
+    <h3>${t('change_password_title')}</h3>
+    <p class="muted">${t('login_hint')}</p>
+    <label>${t('new_password')}</label><input type="password" id="cp-password" autocomplete="new-password" />
+    <div class="row" style="margin-top:12px"><button class="btn primary" id="cp-save">${t('save')}</button></div>`);
+  $('#cp-save').onclick = async () => {
+    const pw = $('#cp-password').value;
+    if (!pw) return notifyError(t('password_required'));
+    try {
+      await api.send('/api/auth/change-password', 'POST', { password: pw });
+      if (currentUser) currentUser.mustChangePassword = false;
+      closeModalX();
+      renderAuth();
+      refresh();
+    } catch (e) { /* error toasted by api.send */ }
   };
 }
 
@@ -612,6 +822,14 @@ $('#new-bug').onclick = newBugForm;
 $('#new-doc').onclick = newDocForm;
 $('#new-project').onclick = newProjectForm;
 $('#new-user').onclick = newUserForm;
+$('#lang-select').onchange = (e) => setLang(e.target.value);
+$('#login-btn').onclick = loginForm;
+$('#logout-btn').onclick = async () => {
+  try { await api.send('/api/auth/logout', 'POST', {}); } catch (e) { /* ignore */ }
+  currentUser = null;
+  renderAuth();
+  refresh();
+};
 $('#modal-bg').onclick = (e) => { if (e.target === e.currentTarget) closeModal(); };
 $('#q').oninput = debounce(loadBoard, 300);
 $('#bq').oninput = debounce(loadBugs, 300);
@@ -622,7 +840,11 @@ $('#b-status').onchange = loadBugs;
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
+document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+$('#lang-select').value = lang;
+applyI18n();
 initProjects().then(refresh);
+checkAuth().then((u) => { if (u && u.mustChangePassword) changePasswordForm(); });
 setInterval(() => { if (!document.hidden) refresh(); }, 15000);
 </script>
 </body>
