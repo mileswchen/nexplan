@@ -12,14 +12,14 @@ trail, diffs, conflict-safe parallel work, and real version history for document
 
 | Capability | How it works |
 |---|---|
-| **手动录入 backlog** | Web 看板 / `nexplan add` CLI / MCP `nexplan_backlog_add` |
-| **Agent 把分解任务录入 backlog** | MCP `nexplan_backlog_decompose` / `nexplan_backlog_add` |
-| **Agent 取 item，做完自动更新状态** | `nexplan_backlog_claim` → `nexplan_backlog_complete` |
-| **设计与决策文档（版本管理）** | MCP `nexplan_docs_create/update/history/diff`；每个更新产生 git 版本 |
-| **手动录入 bug + Agent 自动发现的 bug** | `nexplan_bug_add/list/update`；完成关联 item 时自动 `fixed` |
-| **多项目管理** | 一个工作区可承载多个项目，各自独立的 backlog / 缺陷 / 文档；`--project` / `?project=` / MCP `project` 参数选择 |
-| **多用户管理** | 用户注册表（人类 + Agent）带角色 `admin / member / viewer`；`viewer` 只读，可强制校验 |
-| **访问控制** | 项目成员名单校验（有名单的项目仅限成员 + admin 访问）；开启严格模式后 `admin` 才能管理 |
+| **Manually enter backlog** | Web kanban board / `nexplan add` CLI / MCP `nexplan_backlog_add` |
+| **Agent enters decomposed tasks into backlog** | MCP `nexplan_backlog_decompose` / `nexplan_backlog_add` |
+| **Agent claims an item; status updates automatically when done** | `nexplan_backlog_claim` → `nexplan_backlog_complete` |
+| **Design & decision docs (versioned)** | MCP `nexplan_docs_create/update/history/diff`; every update creates a git version |
+| **Manually entered bugs + agent-discovered bugs** | `nexplan_bug_add/list/update`; auto-`fixed` when the linked item completes |
+| **Multi-project management** | One workspace holds multiple projects, each with its own backlog / bugs / docs; select via `--project` / `?project=` / MCP `project` parameter |
+| **Multi-user management** | User registry (humans + agents) with `admin / member / viewer` roles; `viewer` is read-only, can be strictly enforced |
+| **Access control** | Project member-roster check (projects with a roster are limited to members + admins); with strict mode enabled, only `admin` can manage |
 
 ## Quick start
 
@@ -34,13 +34,13 @@ npm run build
 
 # 3. Human interfaces
 nexplan web                  # open the web dashboard on http://127.0.0.1:3344
-nexplan add "重构认证模块" --type refactor --priority P1 --tags auth
+nexplan add "Refactor auth module" --type refactor --priority P1 --tags auth
 nexplan list --status backlog
 nexplan status
 
 # 4. Projects & users
-nexplan project new api --name "API 重写" --description Backend
-nexplan --project api add "订单接口" --priority P0
+nexplan project new api --name "API rewrite" --description Backend
+nexplan --project api add "Order API" --priority P0
 nexplan user add claude-code --kind agent --role member
 nexplan user list
 
@@ -206,9 +206,9 @@ configuration, and a troubleshooting FAQ — in both English and Chinese.
 
 ```bash
 export NEXPLAN_BOARD="$PWD/.nexplan"
-nexplan add "重构认证模块" --type refactor --priority P1 --manual
+nexplan add "Refactor auth module" --type refactor --priority P1 --manual
 nexplan list --status backlog
 nexplan claim WI-1 --assignee claude-code
-nexplan done WI-1 --note "完成"
+nexplan done WI-1 --note "Done"
 nexplan web
 ```
