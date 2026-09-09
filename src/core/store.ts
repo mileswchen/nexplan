@@ -426,6 +426,39 @@ export class Store {
     }, `workitem: note ${id}`);
   }
 
+  /**
+   * Delete a work item. Ownership/permission checks live in the caller (see
+   * `Workspace.deleteWorkItem`); this method only performs the physical removal
+   * and keeps the hierarchy consistent:
+   *   - Refuses to delete an item that still has children (deleted first).
+   *   - Detaches the item from its parent's `children` list, if the parent
+   *     still exists.
+   * Returns the deleted item so callers can report what was removed.
+   */
+  async deleteWorkItem(id: string): Promise<WorkItem> {
+    const existing = await this.getWorkItem(id);
+    if (!existing) throw new Error(`work item not found: ${id}`);
+    if (existing.children.length > 0) {
+      throw new Error(`cannot delete ${id}: it still has ${existing.children.length} child item(s) — delete them first`);
+    }
+    return this.tx(async () => {
+      // Detach from the parent's children list so we never leave a dangling ref.
+      if (existing.parent) {
+        const parent = await this.getWorkItem(existing.parent);
+        if (parent) {
+          const updatedParent = {
+            ...parent,
+            children: parent.children.filter((c) => c !== id),
+            updatedAt: NOW(),
+          } as WorkItem;
+          await this.writeJson(this.wiPath(parent.id), updatedParent);
+        }
+      }
+      await fs.rm(this.wiPath(id), { force: true });
+      return existing;
+    }, `workitem: delete ${id}`);
+  }
+
   // --------------------------------------------------------------------- bugs
 
   async createBug(input: {

@@ -405,6 +405,19 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
     }
   });
 
+  app.delete('/api/workitems/:id', async (req, res, next) => {
+    try {
+      // Delete is restricted to the item's creator or an admin (see
+      // Workspace.deleteWorkItem), and here additionally requires a login.
+      const actor = me(req);
+      const key = await workspace.resolveProject((req.query.project as string) || process.env.NEXPLAN_PROJECT);
+      await workspace.deleteWorkItem(key, req.params.id, actor);
+      res.json({ ok: true, id: req.params.id });
+    } catch (e) {
+      next(e);
+    }
+  });
+
   // ------------------------------------------------------------------ bugs
   app.get('/api/bugs', async (req, res, next) => {
     try {

@@ -49,7 +49,7 @@ describe('MCP server tools', () => {
     expect(names).toContain('nexplan_agent_next');
     expect(names).toContain('nexplan_project_create');
     expect(names).toContain('nexplan_user_add');
-    expect(names.length).toBe(26);
+    expect(names.length).toBe(27);
   });
 
   it('adds a backlog item and lists it', async () => {
@@ -136,6 +136,29 @@ describe('MCP server tools', () => {
     expect((apiList.structuredContent as any).items[0].title).toBe('API task');
     const projects = await call('nexplan_project_list', {});
     expect((projects.structuredContent as any).items.map((p: any) => p.key)).toEqual(['default', 'api']);
+  });
+
+  it('deletes an item as its creator or an admin, but not as an unrelated member', async () => {
+    const item = await call('nexplan_backlog_add', { items: [{ title: 'Delete me' }], author: 'codex' });
+    const itemId = (item.structuredContent as any).created[0].id;
+
+    // Creator can delete.
+    const del = await call('nexplan_backlog_delete', { id: itemId, author: 'codex' });
+    expect(del.isError).toBeFalsy();
+    expect((del.structuredContent as any).id).toBe(itemId);
+    const after = await call('nexplan_backlog_get', { id: itemId, author: 'codex' });
+    expect(after.isError).toBeTruthy(); // gone
+
+    // A non-creator, non-admin member is denied (SDK surfaces as isError).
+    const item2 = await call('nexplan_backlog_add', { items: [{ title: 'Keep' }], author: 'codex' });
+    const item2Id = (item2.structuredContent as any).created[0].id;
+    const denied = await call('nexplan_backlog_delete', { id: item2Id, author: 'alice' });
+    expect(denied.isError).toBeTruthy();
+    expect(denied.content[0].text).toMatch(/creator|admin/);
+
+    // Admin can delete regardless of who created it.
+    const adminDel = await call('nexplan_backlog_delete', { id: item2Id, author: 'admin' });
+    expect(adminDel.isError).toBeFalsy();
   });
 
   it('manages users through MCP', async () => {

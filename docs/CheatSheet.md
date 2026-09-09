@@ -29,6 +29,7 @@ nexplan add "重构认证" --type refactor --priority P1 --manual   # 录入 bac
 nexplan list --status backlog                                    # 查看
 nexplan claim WI-1 --assignee claude-code                        # 认领
 nexplan done WI-1 --note "完成"                                  # 标记完成
+nexplan rm WI-1                                                  # 删除（仅创建者或管理员）
 nexplan project new api --name "API"                             # 新建项目
 nexplan --project api add "订单接口" --priority P0               # 在 api 项目录入
 nexplan user add claude-code --kind agent --role member          # 注册用户
@@ -49,6 +50,7 @@ nexplan web                                                      # 打开看板�
 | `nexplan done <id> [--note n] [--no-close-bugs]` | 完成（→ done，自动关 bug）|
 | `nexplan decompose <parentId> --child "<c>" …` | 拆分 |
 | `nexplan note <id> <body>` | 加备注 |
+| `nexplan rm <id>` | 删除（仅创建者或管理员）|
 
 ## 缺陷 / Bugs
 
@@ -99,7 +101,7 @@ args:    ["/abs/path/nexplan/dist/mcp/server.js"]
 env:     { NEXPLAN_BOARD: "...", NEXPLAN_PROJECT: "<key>", NEXPLAN_AGENT: "<agent>" }
 ```
 
-26 个 `nexplan_*` 工具：`backlog_add/list/get/claim/update/complete/decompose/note`、
+27 个 `nexplan_*` 工具：`backlog_add/list/get/claim/update/complete/decompose/note/delete`、
 `docs_list/get/create/update/history/diff`、`bug_add/list/get/update`、`status`、`agent_next`、
 `project_list/create/set_default`、`user_list/add/update`。多数工具接受可选 `project` 与 `author` 参数。
 

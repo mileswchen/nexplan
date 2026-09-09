@@ -122,6 +122,7 @@ board directory for a single command.
 | `nexplan done <id> [options]` (`complete`) | Mark done; `--note`, `--no-close-bugs`. Auto-closes bugs listed in `fixesBug`. |
 | `nexplan decompose <parentId> --child "<title>" …` | Split a parent into child backlog items (linked to the parent). |
 | `nexplan note <id> <body>` | Append a progress/context note. |
+| `nexplan rm <id>` (`delete`) | Delete a work item. Only its creator or an admin can delete it. |
 
 #### Examples
 
@@ -260,7 +261,7 @@ A cross-agent overview: [`docs/AGENTS.md`](AGENTS.md).
 > If an agent can’t load MCP servers, it can drive the exact same board by shelling
 > out to the `nexplan` CLI (Step 5).
 
-### The 26 tools
+### The 27 tools
 
 Most tools accept an optional `project` argument (defaults to `$NEXPLAN_PROJECT` or
 the workspace default).
@@ -274,6 +275,7 @@ the workspace default).
 | `nexplan_backlog_update` | Edit any field (incl. status) |
 | `nexplan_backlog_decompose` | Split a parent item into child backlog items |
 | `nexplan_backlog_note` | Append a progress/context note |
+| `nexplan_backlog_delete` | Delete an item (its creator or an admin only) |
 | `nexplan_docs_list` / `nexplan_docs_get` | Read design/decision docs |
 | `nexplan_docs_create` | Record a design/decision/ADR document |
 | `nexplan_docs_update` | Update a doc → new version |
@@ -323,9 +325,10 @@ The dashboard has these tabs:
 - **Bugs** — searchable bug list with severity/status badges; **+ 录入缺陷** to report
   one; inline “标记已修”; click a bug to edit severity/status.
 - **Docs** — a document list on the left; select one to view its content (rendered
-  from **Markdown**: headings, lists, tables, code blocks, images, links…), metadata and
-  **version history** on the right. **编辑（生成新版本）** updates it as a new version;
-  **新建文档** creates one.
+  from **Markdown**: headings, lists, tables, code blocks, images, links… and
+  **Mermaid** ` ```mermaid ` diagrams rendered in the browser), metadata and
+  **version history** on the right. **编辑（生成新版本）** opens an inline editor with a
+  live preview; **新建文档** creates one.
 - **Admin** — project statistics and management (see below).
 
 The project selector in the header switches the active project. The **管理 (Admin)**

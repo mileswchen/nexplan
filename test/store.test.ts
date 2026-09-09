@@ -101,6 +101,20 @@ describe('work items', () => {
     const q = await store.listWorkItems({ query: 'B' });
     expect(q).toHaveLength(1);
   });
+
+  it('deletes a work item and detaches it from its parent', async () => {
+    const parent = await store.createWorkItem({ title: 'Parent', type: 'feature' });
+    const { children } = await store.decomposeWorkItem(parent.id, [{ title: 'Child' }]);
+    // Refuses to delete a parent that still has children.
+    await expect(store.deleteWorkItem(parent.id)).rejects.toThrow(/child/);
+    // Deleting a detached leaf works and clears it from the parent's children.
+    const deleted = await store.deleteWorkItem(children[0].id);
+    expect(deleted.id).toBe(children[0].id);
+    expect(await store.getWorkItem(children[0].id)).toBeNull();
+    expect((await store.getWorkItem(parent.id))?.children).toEqual([]);
+    // Deleting an unknown id throws.
+    await expect(store.deleteWorkItem('WI-999')).rejects.toThrow(/not found/);
+  });
 });
 
 describe('bugs', () => {

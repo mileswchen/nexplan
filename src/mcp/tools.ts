@@ -252,6 +252,26 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     },
   );
 
+  server.registerTool(
+    'nexplan_backlog_delete',
+    {
+      title: 'Delete a backlog item',
+      description:
+        'Delete a work item. Only the item\'s creator or a project admin (role=admin) can ' +
+        'delete it; members can edit but not remove. An item that still has child items ' +
+        'cannot be deleted — delete the children first.',
+      inputSchema: z.object({
+        id: z.string().describe('Work item id, e.g. WI-3.'),
+        author: z.string().optional().describe('Deleting actor (your agent/user name).'),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { project, actor } = await projectStore(workspace, args, { write: true });
+      return ok(await workspace.deleteWorkItem(project, args.id, actor));
+    },
+  );
+
   // ------------------------------------------------------------------- docs
 
   server.registerTool(

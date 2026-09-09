@@ -20,7 +20,7 @@ NexPlan 是一个**基于 git 的项目管理中枢**，面向编码 Agent 与�
 它通过**三种接口**暴露，全部共享同一套存储：
 
 1. **CLI** —— `nexplan …`（人类、脚本）。
-2. **MCP server** —— `node dist/mcp/server.js`（Agent；26 个 `nexplan_*` 工具）。
+2. **MCP server** —— `node dist/mcp/server.js`（Agent；27 个 `nexplan_*` 工具）。
 3. **Web 看板** —— `nexplan web`（人类；看板、缺陷、文档查看/历史、项目与用户管理后台）。
    人类用户用密码登录；未登录访客只能**读**公开项目。
 
@@ -118,6 +118,7 @@ nexplan web
 | `nexplan done <id> [选项]`（`complete`） | 标记完成；`--note`、`--no-close-bugs`。自动关闭 `fixesBug` 中的缺陷。 |
 | `nexplan decompose <父ID> --child "<标题>" …` | 把父项拆分成子 backlog 项（与父项关联）。 |
 | `nexplan note <id> <内容>` | 追加进度 / 上下文备注。 |
+| `nexplan rm <id>`（`delete`） | 删除工作项。仅创建者或管理员可删除。 |
 
 #### 示例
 
@@ -249,7 +250,7 @@ env:
 
 > 如果某个 Agent 无法加载 MCP server，它也可以直接 shell 调用 `nexplan` CLI（第 5 节）。
 
-### 26 个工具
+### 27 个工具
 
 多数工具都接受可选的 `project` 参数（默认取 `$NEXPLAN_PROJECT` 或工作区默认项目）。
 
@@ -262,6 +263,7 @@ env:
 | `nexplan_backlog_update` | 编辑任意字段（含状态） |
 | `nexplan_backlog_decompose` | 把父项拆成子 backlog 项 |
 | `nexplan_backlog_note` | 追加进度 / 上下文备注 |
+| `nexplan_backlog_delete` | 删除条目（仅创建者或管理员） |
 | `nexplan_docs_list` / `nexplan_docs_get` | 读取设计 / 决策文档 |
 | `nexplan_docs_create` | 记录设计 / 决策 / ADR 文档 |
 | `nexplan_docs_update` | 更新文档 → 新版本 |
@@ -304,8 +306,8 @@ LAN 地址（对外暴露前请先改掉默认 `admin` 密码！）。界面**�
 - **缺陷** —— 可搜索的缺陷列表，带级别 / 状态徽标；**+ 录入缺陷** 上报；行内“标记已修”；
   点击某项可编辑级别 / 状态。
 - **文档** —— 左侧文档列表；选中后在右侧查看正文（支持 **Markdown 渲染**：标题、列表、表格、
-  代码块、图片、链接…）、元信息与**版本历史**。**编辑（生成新版本）**
-  会作为新版本更新；**新建文档** 创建文档。
+  代码块、图片、链接…以及 **Mermaid** ` ```mermaid ` 架构图，浏览器内实时渲染）、元信息与
+  **版本历史**。**编辑（生成新版本）** 打开带实时预览的内联编辑器；**新建文档** 创建文档。
 - **管理** —— 项目统计与项目管理（见下）。
 
 顶部栏的**项目切换器**可切换活动项目。**管理**标签页新增**项目统计**面板（各项目的

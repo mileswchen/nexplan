@@ -10,6 +10,7 @@ import {
   User,
   UserKind,
   UserRole,
+  WorkItem,
 } from './types.js';
 
 export interface WorkspaceOptions {
@@ -474,6 +475,32 @@ export class Workspace {
     if (opts.write && role === 'viewer') {
       throw new Error(`user ${author} is read-only (viewer)`);
     }
+  }
+
+  /**
+   * Deleting a work item is a destructive action restricted to the item's
+   * creator or a workspace admin. Unlike the looser write gate, this rule is
+   * enforced regardless of `enforcePermissions`: a member can edit, but only the
+   * creator (or an admin) can remove the item.
+   */
+  async assertCanDeleteWorkItem(projectKey: string, author: string | undefined, createdBy: string): Promise<void> {
+    const role = await this.roleOf(author);
+    if (role === 'admin') return;
+    if (author && author === createdBy) return;
+    throw new Error(`only the creator (${createdBy}) or an admin can delete this item (current: ${author || '?'})`);
+  }
+
+  /**
+   * Delete a work item after applying the full access gate (project roster /
+   * strict mode / viewer-read-only) plus the creator-or-admin rule.
+   */
+  async deleteWorkItem(projectKey: string, id: string, author?: string): Promise<WorkItem> {
+    await this.assertProjectAccess(projectKey, author, { write: true });
+    const store = this.getStore(projectKey);
+    const item = await store.getWorkItem(id);
+    if (!item) throw new Error(`work item not found: ${id}`);
+    await this.assertCanDeleteWorkItem(projectKey, author, item.createdBy);
+    return store.deleteWorkItem(id);
   }
 
   /** Per-project statistics for all projects (for admin dashboards). */

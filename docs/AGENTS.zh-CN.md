@@ -48,7 +48,7 @@ Agent **永远不需要密码** —— Web 登录密码只给人类看板用户�
 首次登录强制改密），所以开启严格模式（`nexplan config set-enforce-permissions true`）
 永远不会把管理权限锁死。
 
-## 26 个工具
+## 27 个工具
 
 多数工具接受可选的 `project` 参数（默认取 `NEXPLAN_PROJECT` 或工作区默认项目）。
 
@@ -61,6 +61,7 @@ Agent **永远不需要密码** —— Web 登录密码只给人类看板用户�
 | `nexplan_backlog_update` | 编辑任意字段（含状态）|
 | `nexplan_backlog_decompose` | 把父项拆成子 backlog 项 |
 | `nexplan_backlog_note` | 追加进度 / 上下文备注 |
+| `nexplan_backlog_delete` | 删除条目（仅创建者或管理员）|
 | `nexplan_docs_list` / `nexplan_docs_get` | 读取设计 / 决策文档 |
 | `nexplan_docs_create` | 记录设计 / 决策 / ADR 文档 |
 | `nexplan_docs_update` | 更新文档 → 新版本 |

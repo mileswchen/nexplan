@@ -178,6 +178,24 @@ describe('users', () => {
     expect(b?.summary.totalBugs).toBe(1);
     expect(a?.summary.projectKey).toBe('a');
   });
+
+  it('restricts deleting a work item to its creator or an admin', async () => {
+    await ws.createUser({ id: 'alice' }); // member
+    await ws.createUser({ id: 'boss', role: 'admin' });
+    const store = ws.getStore('default');
+    // A non-creator, non-admin member cannot delete.
+    const item = await store.createWorkItem({ title: 'X', author: 'alice' });
+    await expect(ws.deleteWorkItem('default', item.id, 'bob')).rejects.toThrow(/creator|admin/);
+    // The creator can delete their own item.
+    await expect(ws.deleteWorkItem('default', item.id, 'alice')).resolves.toBeDefined();
+    expect(await store.getWorkItem(item.id)).toBeNull();
+    // An admin can delete regardless of who created the item.
+    const item2 = await store.createWorkItem({ title: 'Y', author: 'alice' });
+    await expect(ws.deleteWorkItem('default', item2.id, 'boss')).resolves.toBeDefined();
+    expect(await store.getWorkItem(item2.id)).toBeNull();
+    // Deleting an unknown id throws.
+    await expect(ws.deleteWorkItem('default', 'WI-404', 'boss')).rejects.toThrow(/not found/);
+  });
 });
 
 describe('legacy migration', () => {

@@ -227,6 +227,19 @@ program
     process.stdout.write(formatWorkItem(w) + '\n');
   });
 
+program
+  .command('rm <id>')
+  .alias('delete')
+  .description('Delete a work item (only its creator or an admin can delete).')
+  .action(async (id: string) => {
+    const ws = await workspace();
+    const key = await projectKey();
+    const actor = process.env.NEXPLAN_AGENT || 'user';
+    const w = await ws.deleteWorkItem(key, id, actor);
+    if (program.opts().json) return printJson(w);
+    out(`deleted work item ${w.id}\n`);
+  });
+
 // ---- bugs --------------------------------------------------------------------
 
 const bug = program.command('bug').description('Bug commands.');

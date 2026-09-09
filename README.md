@@ -62,7 +62,7 @@ node dist/cli/index.js list
 ## The three interfaces
 
 - **CLI** (`nexplan …`) — humans and scripting.
-- **MCP server** (`node dist/mcp/server.js`) — agents. Exposes 26 `nexplan_*` tools.
+- **MCP server** (`node dist/mcp/server.js`) — agents. Exposes 27 `nexplan_*` tools.
 - **Web dashboard** (`nexplan web`) — humans: kanban board, bug tracker, doc viewer/history, and a projects/users admin panel.
 
 All three share the same git-backed workspace + `Store`, so they are fully consistent.
@@ -111,6 +111,7 @@ nexplan update <id> [--status s] [--title t] [--priority p] [--doc-link url] ...
 nexplan done <id> [--note n] [--no-close-bugs] [--project key]
 nexplan decompose <parentId> --child "subtask A" [--project key]
 nexplan note <id> <body> [--project key]
+nexplan rm <id> [--project key]   # delete a work item (creator or admin only)
 nexplan bug add "<title>" [--severity s] [--evidence e] [--manual] [--project key]
 nexplan bug list [--status s] [--severity s] [--query q] [--project key]
 nexplan bug get <id> [--project key]

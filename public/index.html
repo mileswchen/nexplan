@@ -98,6 +98,14 @@
   textarea, input[type=text], select { width: 100%; background: var(--panel2); border: 1px solid var(--border);
     color: var(--text); padding: 8px 10px; border-radius: 8px; font-family: inherit; font-size: 13px; }
   textarea { min-height: 120px; font-family: ui-monospace, Menlo, monospace; }
+  /* Inline doc editor: split markdown editor / live preview side by side. */
+  .doc-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: stretch; }
+  .doc-edit-grid textarea { min-height: 420px; resize: vertical; }
+  .doc-edit-grid .md { min-height: 420px; max-height: 560px; overflow: auto; padding: 10px 12px;
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; }
+  @media (max-width: 800px) { .doc-edit-grid { grid-template-columns: 1fr; } }
+  .mermaid { text-align: center; margin: 12px 0; overflow-x: auto; }
+  .md .mermaid svg { max-width: 100%; height: auto; }
   label { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 12px; }
   .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center;
     justify-content: center; z-index: 100; padding: 20px; }
@@ -263,12 +271,14 @@ const I18N = {
     chips_wi: 'Work items', chips_bugs: 'Bugs', chips_docs: 'Docs', board_empty: 'Empty',
     w_status: 'Status', w_claim: 'Start / Claim', w_complete: 'Mark done', w_notes: 'Notes',
     w_no_notes: 'No notes', w_note_ph: 'Add a note…', w_note_add: 'Add', close: 'Close',
+    w_delete: 'Delete', confirm_del_wi: 'Delete item {x}?',
     claim_prompt: 'Assignee (agent or user):', complete_prompt: 'Completion note:',
     bug_mark_fixed: 'Mark fixed', bug_empty: 'No bugs', bug_severity: 'Severity',
     bug_status: 'Status', bug_evidence: 'Evidence', save: 'Save',
     doc_empty: 'No documents', doc_edit: 'Edit (creates new version)', doc_approve: 'Mark approved',
     doc_history: 'Version history', doc_no_versions: 'No versions',
     doc_edit_title: 'Edit document (creates a new version)', doc_content: 'Markdown content',
+    doc_readonly: 'Read-only (join this project or ask an admin to edit)',
     cancel: 'Cancel', doc_save_version: 'Save as new version',
     stat_todo: 'Todo', stat_inprog: 'In progress', stat_done: 'Done', stat_bugs: 'Bugs',
     stat_docs: 'Docs', stat_members: 'Members', stat_empty: 'No data',
@@ -302,12 +312,14 @@ const I18N = {
     chips_wi: '工作项', chips_bugs: '缺陷', chips_docs: '文档', board_empty: '空',
     w_status: '状态', w_claim: '开始 / 认领', w_complete: '标记完成', w_notes: '备注',
     w_no_notes: '暂无备注', w_note_ph: '添加备注…', w_note_add: '添加', close: '关闭',
+    w_delete: '删除', confirm_del_wi: '删除待办 {x} ？',
     claim_prompt: '认领人（agent 或 user）：', complete_prompt: '完成备注：',
     bug_mark_fixed: '标记已修', bug_empty: '暂无缺陷', bug_severity: '级别',
     bug_status: '状态', bug_evidence: '证据', save: '保存',
     doc_empty: '暂无文档', doc_edit: '编辑（生成新版本）', doc_approve: '标记评审通过',
     doc_history: '版本历史', doc_no_versions: '暂无版本',
     doc_edit_title: '编辑文档（将创建新版本）', doc_content: 'Markdown 内容',
+    doc_readonly: '只读（加入该项目或联系管理员以编辑）',
     cancel: '取消', doc_save_version: '保存为新版本',
     stat_todo: '待办', stat_inprog: '进行中', stat_done: '已完成', stat_bugs: '缺陷',
     stat_docs: '文档', stat_members: '成员', stat_empty: '暂无数据',
@@ -450,6 +462,7 @@ function bindCards() {
 async function openItem(id) {
   const i = await api.get('/api/workitems/' + id + '?project=' + encodeURIComponent(project));
   const modal = $('#modal');
+  const canDelete = !!(currentUser && (currentUser.role === 'admin' || currentUser.id === i.createdBy));
   modal.innerHTML = `
     <h3>${esc(i.id)} · ${esc(i.title)}</h3>
     <div class="row" style="margin-bottom:10px">
@@ -476,7 +489,10 @@ async function openItem(id) {
       <input type="text" id="note-input" placeholder="${t('w_note_ph')}" />
       <button class="btn" id="note-add">${t('w_note_add')}</button>
     </div>
-    <div class="row" style="margin-top:16px"><button class="btn" id="w-close">${t('close')}</button></div>`;
+    <div class="row" style="margin-top:16px">
+      ${canDelete ? `<button class="btn sm danger" id="w-delete">${t('w_delete')}</button>` : ''}
+      <button class="btn" id="w-close">${t('close')}</button>
+    </div>`;
   $('.modal-bg').classList.add('open');
   $('#w-status').onchange = async (e) => {
     await api.send('/api/workitems/' + id + '?project=' + encodeURIComponent(project), 'PATCH', { status: e.target.value, author: 'user' });
@@ -502,6 +518,13 @@ async function openItem(id) {
     if (!v) return;
     await api.send(`/api/workitems/${id}/note?project=${encodeURIComponent(project)}`, 'POST', { body: v, author: 'user' });
     await openItem(id); await refresh();
+  };
+  const delBtn = $('#w-delete');
+  if (delBtn) delBtn.onclick = async () => {
+    if (!confirm(fmt('confirm_del_wi', { x: i.id + ' · ' + i.title }))) return;
+    await api.send('/api/workitems/' + id + '?project=' + encodeURIComponent(project), 'DELETE', {});
+    closeModal();
+    await refresh();
   };
   $('#w-close').onclick = closeModal;
 }
@@ -574,6 +597,7 @@ function openDocModal(doc) {
     <div class="row" style="margin-top:14px"><button class="btn" id="doc-modal-close">${t('close')}</button></div>`;
   $('.modal-bg').classList.add('open');
   $('#doc-modal-close').onclick = closeModal;
+  renderMermaid();
 }
 
 async function refresh() {
@@ -605,7 +629,7 @@ async function loadBugs() {
         <div class="spacer" style="flex:1"></div>
         ${b.status !== 'fixed' && b.status !== 'verified' ? `<button class="btn sm" data-fix="${esc(b.id)}">${t('bug_mark_fixed')}</button>` : ''}
       </div>
-      ${b.evidence ? `<div class="muted" style="font-size:12px;margin-top:4px;font-family:monospace">${esc(b.evidence.slice(0,160))}</div>` : ''}
+      ${b.evidence ? `<div class="muted" style="font-size:12px;margin-top:4px;font-family:monospace">${esc(b.evidence.split('\n')[0].trim())}</div>` : ''}
     </div>`).join('') || `<div class="empty">${t('bug_empty')}</div>`;
   document.querySelectorAll('[data-fix]').forEach(btn => {
     btn.onclick = async (e) => {
@@ -722,11 +746,17 @@ function renderMarkdown(src) {
     // fenced code block
     if (/^```/.test(tline)) {
       flushPara();
+      const lang = (/^```(\S*)/.exec(tline) || [])[1] || '';
       const buf = [];
       i++;
       while (i < lines.length && !/^```/.test(lines[i].trim())) { buf.push(lines[i]); i++; }
       i++; // skip closing fence
-      html.push(`<pre class="code"><code>${escMd(buf.join('\n'))}</code></pre>`);
+      const code = buf.join('\n');
+      if (lang === 'mermaid') {
+        html.push(`<div class="mermaid"><pre class="code"><code>${escMd(code)}</code></pre></div>`);
+      } else {
+        html.push(`<pre class="code"><code>${escMd(code)}</code></pre>`);
+      }
       continue;
     }
     // ATX heading
@@ -774,9 +804,69 @@ function renderMarkdown(src) {
 }
 // [/md renderer]
 
+// ---------------- Mermaid diagrams ----------------
+// Mermaid is not bundled (the app is otherwise dependency-free); it is loaded
+// lazily from a CDN the first time a ```mermaid block appears, and never blocks
+// the page. If the load or render fails (e.g. offline, or invalid diagram
+// syntax), the raw fenced code block is left in place as readable fallback.
+let _mermaidPromise = null;
+function mermaidTheme() {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'default' : 'dark';
+}
+function loadMermaid() {
+  if (window.mermaid) return Promise.resolve(window.mermaid);
+  if (_mermaidPromise) return _mermaidPromise;
+  _mermaidPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js';
+    s.onload = () => {
+      try {
+        window.mermaid.initialize({ startOnLoad: false, theme: mermaidTheme(), securityLevel: 'strict' });
+        resolve(window.mermaid);
+      } catch (e) {
+        reject(e);
+      }
+    };
+    s.onerror = () => reject(new Error('mermaid.js failed to load'));
+    document.head.appendChild(s);
+  });
+  return _mermaidPromise;
+}
+let _mermaidSeq = 0;
+async function renderMermaid() {
+  const els = document.querySelectorAll('.mermaid:not([data-mermaid-done])');
+  if (!els.length) return;
+  let mermaid;
+  try {
+    mermaid = await loadMermaid();
+  } catch (e) {
+    // Offline / CDN unreachable: leave the raw code block visible.
+    console.warn('[nexplan] mermaid unavailable:', e && e.message);
+    els.forEach((el) => el.setAttribute('data-mermaid-done', '1'));
+    return;
+  }
+  for (const el of els) {
+    el.setAttribute('data-mermaid-done', '1');
+    const code = el.textContent;
+    if (!code.trim()) continue;
+    try {
+      const id = 'mmd-' + Date.now().toString(36) + '-' + (++_mermaidSeq);
+      const { svg } = await mermaid.render(id, code);
+      el.innerHTML = svg;
+      el.classList.add('rendered');
+    } catch (e) {
+      // Invalid syntax: keep the readable code fallback.
+      console.warn('[nexplan] mermaid render failed:', e && e.message, code);
+    }
+  }
+}
+
 // ---------------- docs ----------------
 async function loadDocsList() {
   const docs = await api.get('/api/docs?project=' + encodeURIComponent(project));
+  const canEdit = await canEditDocs();
+  const newBtn = $('#new-doc');
+  if (newBtn) newBtn.style.display = canEdit ? '' : 'none';
   $('#doc-list').innerHTML = docs.map(d => `
     <div class="list-item" data-slug="${esc(d.slug)}">${esc(d.slug)} <span class="muted">v${d.meta.version}</span>
       <span class="st">${d.meta.status}</span> <span class="muted">[${d.meta.type}]</span>
@@ -791,6 +881,7 @@ async function openDoc(slug) {
   const q = 'project=' + encodeURIComponent(project);
   const d = await api.get('/api/docs/' + s + '?' + q);
   const hist = await api.get('/api/docs/' + s + '/history?' + q);
+  const canEdit = await canEditDocs();
   $('#doc-view').innerHTML = `
     <div class="row">
       <h2 style="margin:0">${esc(d.meta.title)}</h2>
@@ -798,33 +889,75 @@ async function openDoc(slug) {
       <span class="st">${esc(d.meta.status)}</span>
     </div>
     <div class="row" style="margin:10px 0">
-      <button class="btn sm" id="doc-edit">${t('doc_edit')}</button>
-      <button class="btn sm" id="doc-status">${t('doc_approve')}</button>
+      ${canEdit
+        ? `<button class="btn sm" id="doc-edit">${t('doc_edit')}</button>
+           <button class="btn sm" id="doc-status">${t('doc_approve')}</button>`
+        : `<span class="muted">${t('doc_readonly')}</span>`}
     </div>
     <div class="md" id="doc-content">${renderMarkdown(d.content)}</div>
     <h3 style="margin:16px 0 8px">${t('doc_history')}</h3>
     <div class="doc-body" style="min-height:auto">${hist.map(v => `v${v.version} · ${v.sha.slice(0,8)} · ${esc(v.author)} · ${esc(new Date(v.date).toLocaleString())}<br>${esc(v.message)}`).join('<br><br>') || t('doc_no_versions')}</div>`;
-  $('#doc-edit').onclick = () => editDoc(slug, d.content);
-  $('#doc-status').onclick = async () => {
+  const editBtn = $('#doc-edit');
+  if (editBtn) editBtn.onclick = () => editDocInline(slug, d.content, d.meta);
+  const statusBtn = $('#doc-status');
+  if (statusBtn) statusBtn.onclick = async () => {
     await api.send('/api/docs/' + s + '?' + q, 'PATCH', { status: 'approved', author: 'user' });
     await openDoc(slug); await refresh();
   };
+  renderMermaid();
 }
 
-function editDoc(slug, content) {
-  const modal = $('#modal');
-  modal.innerHTML = `
-    <h3>${t('doc_edit_title')}</h3>
-    <label>${t('doc_content')}</label>
-    <textarea id="doc-body">${esc(content)}</textarea>
-    <div class="row" style="margin-top:12px"><button class="btn" id="doc-cancel">${t('cancel')}</button>
-      <button class="btn primary" id="doc-save">${t('doc_save_version')}</button></div>`;
-  $('.modal-bg').classList.add('open');
-  $('#doc-cancel').onclick = closeModal;
-  $('#doc-save').onclick = async () => {
-    await api.send('/api/docs/' + encodeURIComponent(slug) + '?project=' + encodeURIComponent(project), 'PATCH', { content: $('#doc-body').value, author: 'user' });
-    closeModal(); await openDoc(slug); await refresh();
+// Whether the logged-in user may edit documents in the current project. Mirrors
+// the server's write gate: admins always can; viewers never can; a rostered
+// project additionally requires membership; an open (empty) project is public.
+async function canEditDocs() {
+  if (!currentUser) return false;
+  if (currentUser.role === 'viewer') return false;
+  if (currentUser.role === 'admin') return true;
+  try {
+    const w = await api.get('/api/workspace');
+    const p = (w.projects || []).find(x => x.key === project);
+    if (!p) return false;
+    if (!(p.members || []).length) return true; // open project → public
+    return p.members.includes(currentUser.id);
+  } catch {
+    return false;
+  }
+}
+
+// Inline editor: markdown textarea on the left, live-rendered preview on the
+// right. Saving PATCHes a new version in place (no modal).
+function editDocInline(slug, content, meta) {
+  const s = encodeURIComponent(slug);
+  const q = 'project=' + encodeURIComponent(project);
+  $('#doc-view').innerHTML = `
+    <div class="row">
+      <h2 style="margin:0">${esc(meta.title)}</h2>
+      <span class="muted">${esc(slug)} · v${meta.version} → ${t('doc_edit_title')}</span>
+      <span class="st">${esc(meta.status)}</span>
+    </div>
+    <div class="doc-edit-grid" style="margin-top:10px">
+      <textarea id="doc-md" placeholder="${t('doc_content')}">${esc(content)}</textarea>
+      <div class="md" id="doc-preview">${renderMarkdown(content)}</div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="doc-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="doc-save">${t('doc_save_version')}</button>
+      <span class="muted" style="align-self:center">${esc(slug)}</span>
+    </div>`;
+  const md = $('#doc-md');
+  const debouncedMermaid = debounce(renderMermaid, 200);
+  md.oninput = () => {
+    $('#doc-preview').innerHTML = renderMarkdown(md.value);
+    debouncedMermaid();
   };
+  $('#doc-cancel').onclick = () => openDoc(slug);
+  $('#doc-save').onclick = async () => {
+    await api.send('/api/docs/' + s + '?' + q, 'PATCH', { content: md.value, author: 'user' });
+    await openDoc(slug); await refresh();
+  };
+  renderMermaid();
+  md.focus();
 }
 
 // ---------------- admin (projects & users) ----------------

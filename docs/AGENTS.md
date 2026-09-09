@@ -50,7 +50,7 @@ workspace also auto-bootstraps a default `admin` (initial password `admin`, forc
 change on first login), so enabling strict mode
 (`nexplan config set-enforce-permissions true`) can never lock out management.
 
-## The 26 tools
+## The 27 tools
 
 Most tools accept an optional `project` argument (defaults to `NEXPLAN_PROJECT` or the
 workspace default).
@@ -64,6 +64,7 @@ workspace default).
 | `nexplan_backlog_update` | Edit any field (incl. status) |
 | `nexplan_backlog_decompose` | Split a parent item into child backlog items |
 | `nexplan_backlog_note` | Append a progress/context note |
+| `nexplan_backlog_delete` | Delete an item (its creator or an admin only) |
 | `nexplan_docs_list` / `nexplan_docs_get` | Read design/decision docs |
 | `nexplan_docs_create` | Record a design/decision/ADR document |
 | `nexplan_docs_update` | Update a doc → new version |
