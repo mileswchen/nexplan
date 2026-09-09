@@ -60,7 +60,7 @@ export class Workspace {
     const usersDir = path.join(this.root, 'users');
     await fs.mkdir(projectsDir, { recursive: true });
     await fs.mkdir(usersDir, { recursive: true });
-    await this.git.init();
+    await this.git.init({ atCwd: true });
 
     if (!(await this.exists(path.join(this.root, 'workspace.json')))) {
       const cfg: WorkspaceConfig = {

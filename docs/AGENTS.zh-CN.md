@@ -30,6 +30,24 @@ env:
 
 省略时使用 `NEXPLAN_AGENT`（或 `agent`）。
 
+## 给 Agent 授权（角色与项目）
+
+先注册你的 Agent（admin 操作），再把它加入某项目的成员名单，或授予 `admin` 角色：
+
+```bash
+nexplan user add claude-code --kind agent --role member
+nexplan project new backend --members claude-code
+nexplan agent config claude-code --project backend   # 打印可直接粘贴的 MCP 配置
+```
+
+`nexplan agent config` 会输出限定到该 Agent + 项目的 MCP 片段（带 `NEXPLAN_PROJECT` 与
+`NEXPLAN_AGENT`）以及它的角色 / 成员状态。
+
+Agent **永远不需要密码** —— Web 登录密码只给人类看板用户用；Agent 按 **id + 项目成员**
+鉴权（MCP/CLI 不变）。每个工作区还会自动引导出一个默认 `admin`（初始密码 `admin`，
+首次登录强制改密），所以开启严格模式（`nexplan config set-enforce-permissions true`）
+永远不会把管理权限锁死。
+
 ## 26 个工具
 
 多数工具接受可选的 `project` 参数（默认取 `NEXPLAN_PROJECT` 或工作区默认项目）。

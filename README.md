@@ -103,11 +103,11 @@ npm run dev:web      # run the web server from source
 Global options: `--root <path>` (workspace dir), `--project <key>`, `--json`.
 
 ```
-nexplan add "<title>" [--type t] [--priority P] [--description d] [--tags a,b] [--assignee name] [--manual] [--json-input] [--project key]
+nexplan add "<title>" [--type t] [--priority P] [--description d] [--tags a,b] [--assignee name] [--doc-link url] [--manual] [--json-input] [--project key]
 nexplan list [--status s] [--priority p] [--assignee name] [--query q] [--limit n] [--project key]
 nexplan get <id> [--project key]
 nexplan claim <id> --assignee name [--project key]
-nexplan update <id> [--status s] [--title t] [--priority p] ... [--project key]
+nexplan update <id> [--status s] [--title t] [--priority p] [--doc-link url] ... [--project key]
 nexplan done <id> [--note n] [--no-close-bugs] [--project key]
 nexplan decompose <parentId> --child "subtask A" [--project key]
 nexplan note <id> <body> [--project key]
@@ -117,7 +117,7 @@ nexplan bug get <id> [--project key]
 nexplan bug update <id> [--status s] [--severity s] [--assignee name] [--project key]
 nexplan docs list | docs show <slug> | docs new <title> | docs update <slug> | docs history <slug> | docs diff <slug> <shaA> <shaB>   [--project key]
 nexplan status [--project key]
-nexplan web [--port n]
+nexplan web [--port n] [--host h | --remote]   # --remote = 0.0.0.0, allow other machines (prints LAN URLs)
 
 # Multi-project
 nexplan project list

@@ -42,7 +42,7 @@ env:
   NEXPLAN_AGENT:  dsh
 ```
 
-随后 20 个 `nexplan_*` 工具就会出现在 dsh 的工具列表里。
+随后 26 个 `nexplan_*` 工具就会出现在 dsh 的工具列表里。
 
 ## dsh 的习惯做法
 

@@ -84,6 +84,14 @@ describe('MCP server tools', () => {
     expect((bugAfter.structuredContent as any).status).toBe('fixed');
   });
 
+  it('stores and updates a design document link', async () => {
+    const r = await call('nexplan_backlog_add', { items: [{ title: 'X', docLink: 'https://example.com/d' }], author: 'codex' });
+    expect((r.structuredContent as any).created[0].docLink).toBe('https://example.com/d');
+    const id = (r.structuredContent as any).created[0].id;
+    const up = await call('nexplan_backlog_update', { id, docLink: 'https://example.com/d2', author: 'codex' });
+    expect((up.structuredContent as any).docLink).toBe('https://example.com/d2');
+  });
+
   it('decomposes a parent item', async () => {
     const parent = await call('nexplan_backlog_add', { items: [{ title: 'Ship v1' }] });
     const pid = (parent.structuredContent as any).created[0].id;

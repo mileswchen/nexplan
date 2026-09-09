@@ -69,6 +69,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     tags: z.array(z.string()).optional(),
     estimate: z.number().nullish().describe('Story points / hours.'),
     fixesBug: z.array(z.string()).optional().describe('Bug ids this item will fix.'),
+    docLink: z.string().optional().describe('URL of the design document for this item.'),
   });
 
   server.registerTool(
@@ -173,6 +174,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
         assignee: z.string().nullish(),
         tags: z.array(z.string()).optional(),
         estimate: z.number().nullish(),
+        docLink: z.string().nullish(),
         author: z.string().optional(),
         project: projectOpt,
       }),

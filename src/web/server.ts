@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { createHmac } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../core/store.js';
@@ -10,8 +11,19 @@ import { BugFilter, ListFilter, User } from '../core/types.js';
 
 export interface WebServerOptions {
   port?: number;
-  host?: string;
+  host?: string; // bind host; set to '0.0.0.0' (or a LAN IP) to allow other machines in
   root?: string; // workspace root
+}
+
+/** Non-internal IPv4 addresses of this machine (for remote-access hints). */
+function lanIPv4Addresses(): string[] {
+  const out: string[] = [];
+  for (const addrs of Object.values(os.networkInterfaces())) {
+    for (const a of addrs ?? []) {
+      if (a.family === 'IPv4' && !a.internal) out.push(a.address);
+    }
+  }
+  return out;
 }
 
 async function findPackageRoot(): Promise<string> {
@@ -51,6 +63,13 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
     } catch {
       const s = generateSecret();
       await fs.writeFile(secretFile, s, 'utf8');
+      // Never let the signing secret pollute the board's own audit history.
+      const ignoreFile = path.join(boardRoot, '.gitignore');
+      try {
+        await fs.writeFile(ignoreFile, '.web-secret\n', { flag: 'wx' });
+      } catch {
+        /* ignore file already exists */
+      }
       return s;
     }
   })();
@@ -487,8 +506,18 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   const port = opts.port ?? Number(process.env.PORT ?? 3344);
   const host = opts.host ?? process.env.HOST ?? '127.0.0.1';
+  const remote = !['127.0.0.1', 'localhost', '::1'].includes(host.toLowerCase());
   const server = app.listen(port, host, () => {
-    process.stdout.write(`\n  NexPlan dashboard → http://${host}:${port}\n`);
+    process.stdout.write(`\n  NexPlan dashboard → http://127.0.0.1:${port}\n`);
+    if (remote) {
+      // Bound to all interfaces (or a LAN IP): print every address other
+      // machines on the network can use to open the dashboard.
+      for (const ip of lanIPv4Addresses()) {
+        process.stdout.write(`  LAN access        → http://${ip}:${port}\n`);
+      }
+      process.stdout.write(`  (bound to ${host} — anyone on your network can reach the login page;\n`);
+      process.stdout.write(`   change the default admin password: nexplan user password admin <pw>)\n`);
+    }
     process.stdout.write(`  workspace: ${boardRoot}\n\n`);
   });
 

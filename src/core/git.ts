@@ -1,7 +1,18 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { realpathSync } from 'node:fs';
+import path from 'node:path';
 
 const execFileAsync = promisify(execFile);
+
+/** Path equality that tolerates symlinks (e.g. /tmp → /private/tmp on macOS). */
+function samePath(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return path.resolve(a) === path.resolve(b);
+  }
+}
 
 export interface GitCommitInfo {
   sha: string;
@@ -42,9 +53,31 @@ export class Git {
     }
   }
 
-  async init(): Promise<boolean> {
-    // Returns true if a new repo was created, false if one already exists.
-    if (await this.isRepo()) return false;
+  /** Top-level work tree of the repo containing cwd ('' when none). */
+  private async workTreeTop(): Promise<string> {
+    try {
+      const { stdout } = await this.run(['rev-parse', '--show-toplevel']);
+      return stdout;
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Ensure a git repo exists at cwd. Returns true if a new repo was created.
+   *
+   * With `atCwd` (used by the workspace root), cwd is *required* to be its own
+   * repo top-level: if an ancestor repo is found instead — e.g. the board lives
+   * at an ignored path like `$PWD/.nexplan` inside a project repo — a nested
+   * `git init` is run so board commits never land in (or fail against) the host
+   * repo. Without `atCwd` (per-project stores under an already-initialised
+   * workspace repo), any enclosing repo is reused, as before.
+   */
+  async init(opts: { atCwd?: boolean } = {}): Promise<boolean> {
+    if (await this.isRepo()) {
+      const top = await this.workTreeTop();
+      if (!opts.atCwd || (top && samePath(top, this.cwd))) return false;
+    }
     await this.run(['init', '-q']);
     // Ensure we have an author identity so commits never fail on a fresh machine.
     if (!(await this.hasConfig('user.name'))) await this.run(['config', 'user.name', 'NexPlan']);

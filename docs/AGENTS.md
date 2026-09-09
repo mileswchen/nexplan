@@ -30,6 +30,26 @@ name so the git history and UI attribute the change correctly:
 
 If omitted, `NEXPLAN_AGENT` (or `agent`) is used.
 
+## Scoping an agent & access control
+
+Register your agent once (admin operation), then grant access by adding it to a
+project's members or by giving it the `admin` role:
+
+```bash
+nexplan user add claude-code --kind agent --role member
+nexplan project new backend --members claude-code
+nexplan agent config claude-code --project backend   # print a ready-to-paste MCP config
+```
+
+`nexplan agent config` emits an MCP snippet scoped to the agent + project (with
+`NEXPLAN_PROJECT` and `NEXPLAN_AGENT` set) plus its role/membership status.
+
+Agents never need a password — web-login passwords are for human dashboard users only;
+agents are authorized by **id + project membership** (unchanged for MCP/CLI). Every
+workspace also auto-bootstraps a default `admin` (initial password `admin`, forced to
+change on first login), so enabling strict mode
+(`nexplan config set-enforce-permissions true`) can never lock out management.
+
 ## The 26 tools
 
 Most tools accept an optional `project` argument (defaults to `NEXPLAN_PROJECT` or the

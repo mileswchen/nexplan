@@ -76,6 +76,7 @@ program
   .option('--tags <tags>', 'Comma-separated tags.')
   .option('--estimate <n>', 'Estimate (points/hours).')
   .option('--fixes-bug <ids>', 'Comma-separated bug ids this item fixes.')
+  .option('--doc-link <url>', 'URL of the design document for this item.')
   .option('--manual', 'Mark source as manual (human-entered).')
   .option('--json-input', 'Read a JSON array of items from stdin instead of flags.')
   .action(async (title: string | undefined, opts: Record<string, string>) => {
@@ -98,6 +99,7 @@ program
         tags: split(opts.tags),
         estimate: opts.estimate ? Number(opts.estimate) : undefined,
         fixesBug: split(opts.fixesBug),
+        docLink: opts.docLink,
         source,
       });
     }
@@ -169,6 +171,7 @@ program
   .option('--assignee <v>')
   .option('--tags <v>')
   .option('--estimate <n>')
+  .option('--doc-link <v>', 'Design document link (leave empty to clear).')
   .action(async (id: string, opts: Record<string, string>) => {
     const patch: Record<string, unknown> = {};
     if (opts.title !== undefined) patch.title = opts.title;
@@ -179,6 +182,7 @@ program
     if (opts.assignee !== undefined) patch.assignee = opts.assignee;
     if (opts.tags !== undefined) patch.tags = split(opts.tags);
     if (opts.estimate !== undefined) patch.estimate = Number(opts.estimate);
+    if (opts.docLink !== undefined) patch.docLink = opts.docLink || null;
     const w = await (await store(true)).updateWorkItem(id, patch);
     if (program.opts().json) return printJson(w);
     process.stdout.write(formatWorkItem(w) + '\n');
@@ -566,9 +570,12 @@ program
   .command('web')
   .description('Start the NexPlan web dashboard.')
   .option('--port <n>', 'Port (default 3344).', '3344')
+  .option('--host <host>', 'Bind host (default 127.0.0.1; use 0.0.0.0 to allow other machines).')
+  .option('--remote', 'Allow access from other machines on your network (same as --host 0.0.0.0).')
   .action(async (opts: Record<string, string>) => {
     const { startWebServer } = await import('../web/server.js');
-    await startWebServer({ port: Number(opts.port), root: root() });
+    const host = opts.host || (opts.remote ? '0.0.0.0' : undefined);
+    await startWebServer({ port: Number(opts.port), host, root: root() });
   });
 
 program.parseAsync(process.argv).catch((err) => {

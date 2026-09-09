@@ -207,6 +207,7 @@ export class Store {
     tags?: string[];
     estimate?: number | null;
     fixesBug?: string[];
+    docLink?: string | null;
     author?: string;
   }): Promise<WorkItem> {
     const now = NOW();
@@ -227,6 +228,7 @@ export class Store {
       tags: input.tags ?? [],
       estimate: input.estimate ?? null,
       fixesBug: input.fixesBug ?? [],
+      docLink: input.docLink ?? null,
       createdBy: author,
       createdAt: now,
       updatedAt: now,
@@ -389,6 +391,7 @@ export class Store {
           tags: [...parent.tags],
           estimate: null,
           fixesBug: [],
+          docLink: parent.docLink ?? null,
           createdBy: authorName,
           createdAt: now,
           updatedAt: now,

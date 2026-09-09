@@ -21,7 +21,8 @@ NexPlan 是一个**基于 git 的项目管理中枢**，面向编码 Agent 与�
 
 1. **CLI** —— `nexplan …`（人类、脚本）。
 2. **MCP server** —— `node dist/mcp/server.js`（Agent；26 个 `nexplan_*` 工具）。
-3. **Web 看板** —— `nexplan web`（人类；看板、缺陷、文档）。
+3. **Web 看板** —— `nexplan web`（人类；看板、缺陷、文档查看/历史、项目与用户管理后台）。
+   人类用户用密码登录；未登录访客只能**读**公开项目。
 
 ---
 
@@ -109,11 +110,11 @@ nexplan web
 
 | 命令 | 说明 |
 |---|---|
-| `nexplan add "<标题>" [选项]` | 新增一个工作项。`--type`、`--priority`、`--description`、`--assignee`、`--tags a,b`、`--estimate n`、`--fixes-bug BUG-1,BUG-2`、`--manual`、`--json-input`（从 stdin 读 JSON 数组批量新增）。 |
+| `nexplan add "<标题>" [选项]` | 新增一个工作项。`--type`、`--priority`、`--description`、`--assignee`、`--tags a,b`、`--estimate n`、`--fixes-bug BUG-1,BUG-2`、`--doc-link url`、`--manual`、`--json-input`（从 stdin 读 JSON 数组批量新增）。 |
 | `nexplan list` / `ls` | 列出工作项。`--status`、`--type`、`--priority`、`--assignee`、`--tags`、`--query`、`--limit`。 |
 | `nexplan get <id>` | 单条完整详情（含备注、子项、关联）。 |
 | `nexplan claim <id> --assignee <名字>` | 认领：设置 `assignee` 并把状态置为 `in_progress`。可选 `--status`。 |
-| `nexplan update <id> [选项]` | 编辑字段：`--title`、`--description`、`--type`、`--priority`、`--status`、`--assignee`、`--tags`、`--estimate`。 |
+| `nexplan update <id> [选项]` | 编辑字段：`--title`、`--description`、`--type`、`--priority`、`--status`、`--assignee`、`--tags`、`--estimate`、`--doc-link url`（留空清除）。 |
 | `nexplan done <id> [选项]`（`complete`） | 标记完成；`--note`、`--no-close-bugs`。自动关闭 `fixesBug` 中的缺陷。 |
 | `nexplan decompose <父ID> --child "<标题>" …` | 把父项拆分成子 backlog 项（与父项关联）。 |
 | `nexplan note <id> <内容>` | 追加进度 / 上下文备注。 |
@@ -163,7 +164,7 @@ nexplan docs history "下单设计"
 | 命令 | 说明 |
 |---|---|
 | `nexplan status` | 按状态汇总 + 近期活动。 |
-| `nexplan web [--port n]` | 启动 Web 看板（默认端口 3344）。 |
+| `nexplan web [--port n] [--host h \| --remote]` | 启动 Web 看板（默认端口 3344）。默认只监听 `127.0.0.1`；加 `--remote`（或 `--host 0.0.0.0`）可让**局域网其他机器**访问——启动时会打印可达的 LAN 地址。 |
 
 ### 多项目
 
@@ -182,8 +183,9 @@ nexplan docs history "下单设计"
 | 命令 | 说明 |
 |---|---|
 | `nexplan user list` | 列出用户。 |
-| `nexplan user add <id> [--name n] [--kind human\|agent] [--role admin\|member\|viewer]` | 注册用户。 |
+| `nexplan user add <id> [--name n] [--kind human\|agent] [--role admin\|member\|viewer] [--password pw]` | 注册用户。`--password` 给人类用户一个 Web 登录密码（Agent 按 id 鉴权，不需要密码）。 |
 | `nexplan user role <id> <admin\|member\|viewer>` | 改角色。 |
+| `nexplan user password <id> [<pw>]` | 设置 / 重置人类用户的 Web 登录密码。 |
 | `nexplan user rm <id>` | 删除用户。 |
 | `nexplan config set-enforce-permissions <true\|false>` | 开启后仅限已注册用户写入；`viewer` 只读。 |
 
@@ -193,18 +195,26 @@ nexplan docs history "下单设计"
 ```bash
 nexplan project new backend --name "后端" --description "服务端"
 nexplan --project backend add "实现下单 API" --priority P0
-nexplan user add claude-code --kind agent --role member
+nexplan user add alice --kind human --role admin --password s3cret   # 人类用户 → Web 登录
+nexplan user add claude-code --kind agent --role member              # Agent → MCP/CLI，无密码
+nexplan user password alice new-s3cret                               # 重置密码
 nexplan user list
 ```
 
 ### 访问控制与 Agent 配置广播
 
-权限分两层：
+访问控制分三层：
 
 1. **项目成员名单（始终生效）** —— 列出了 `members` 的项目仅限成员 + admin 访问（读写都算）；
    名单为空 = 公开。
 2. **严格模式**（`nexplan config set-enforce-permissions true`）—— 额外要求已注册用户，
    并让 `admin` 成为唯一能管理工作区的角色；`viewer` 只读。
+
+   每个工作区在初始化时都会自动引导出一个默认 **`admin`** 用户（开启严格模式时若缺失也会
+   补建），所以开启严格模式永远不会把自己锁在管理工作区之外——始终有一个 `admin` 可用。
+3. **Web 登录（人类用户）** —— Web 看板用密码认证人类。默认 `admin` 的初始密码是
+   `admin`，首次登录会被强制改密。匿名请求可以**读**公开项目，但写入与管理必须先
+   **登录**。Agent 用户没有密码——仍按 id + 项目成员鉴权（CLI/MCP 不变）。
 
 把 Agent 限定到某个项目并生成它的 MCP 配置：
 
@@ -276,21 +286,34 @@ env:
 
 ## 7. Web 看板
 
-运行 `nexplan web`，然后打开 `http://127.0.0.1:3344`。它有三个标签页：
+运行 `nexplan web`，然后打开 `http://127.0.0.1:3344`。默认只监听 `127.0.0.1`——
+运行 `nexplan web --remote`（或 `--host 0.0.0.0`）可让局域网其他机器访问，启动时会打印
+LAN 地址（对外暴露前请先改掉默认 `admin` 密码！）。界面**中英双语**——用右上角的
+语言切换器（**English / 中文**）切换；选择会被记住，首次访问按浏览器语言自动检测。
+
+人类用户通过右上角 **登录** 按钮登录（ID + 密码）。每个工作区都保证有一个默认的
+**`admin`** 用户，初始密码是 `admin`，首次登录会被**强制修改密码**（登录后立刻弹出
+“修改密码”对话框）。登录后顶栏会显示 `名字（角色）` 和 **退出** 按钮。匿名访客只能
+**读**公开项目，所有写入与管理操作都需要登录——API 出错会以 toast 提示。
+
+它有如下标签页：
 
 - **待办板** —— 按状态分列的看板（`待办 / 待开始 / 进行中 / 评审中 / 完成 / 阻塞`）。点卡片进入
   详情：查看描述、备注，改状态，**开始 / 认领**、**标记完成**、添加备注。用搜索框、优先级和
   负责人筛选，或点 **+ 新建待办** 手动新增。
 - **缺陷** —— 可搜索的缺陷列表，带级别 / 状态徽标；**+ 录入缺陷** 上报；行内“标记已修”；
   点击某项可编辑级别 / 状态。
-- **文档** —— 左侧文档列表；选中后在右侧查看正文、元信息与**版本历史**。**编辑（生成新版本）**
+- **文档** —— 左侧文档列表；选中后在右侧查看正文（支持 **Markdown 渲染**：标题、列表、表格、
+  代码块、图片、链接…）、元信息与**版本历史**。**编辑（生成新版本）**
   会作为新版本更新；**新建文档** 创建文档。
+- **管理** —— 项目统计与项目管理（见下）。
 
 顶部栏的**项目切换器**可切换活动项目。**管理**标签页新增**项目统计**面板（各项目的
 待办/缺陷/文档数量，点卡片直接进入），以及项目与用户管理（新建/删除项目、设默认、改角色、
-加用户、严格权限开关）。
+加用户——加用户表单里有给人类用户填的“密码（可选）”字段、严格权限开关）。
 
-看板每 15 秒自动刷新，并在每次操作后刷新。
+看板每 15 秒自动刷新，并在每次操作后刷新。Web 登录会话有效期为 7 天
+（签名 `nexplan_session` cookie）。
 
 ---
 
@@ -332,6 +355,9 @@ nexplan docs history "下单设计"            # 单篇文档的版本列表
 
 CLI / JSON：`--root <path>`、`--project <key>` 与 `--json` 只改变单次调用的行为。
 
+Web 登录会话有效期 7 天；签名 cookie 用的密钥在首次启动时生成到
+`<board>/.web-secret` —— 不要把它提交进版本库。
+
 ---
 
 ## 11. 问题排查 / FAQ
@@ -343,6 +369,16 @@ CLI / JSON：`--root <path>`、`--project <key>` 与 `--json` 只改变单次调
 可写路径。
 
 **我改了文档但版本没变** —— `docs update` 才会递增版本并提交；`docs new` 从版本 1 开始。
+
+**我在 Web 看板里无法新增或编辑** —— 你没有登录。匿名访客只能读公开项目，所有写入与
+管理操作都需要先登录（右上角 **登录**）。
+
+**admin 的密码是什么？** —— 每个工作区都保证有一个默认 `admin` 用户，初始密码 `admin`，
+首次登录强制改密。随时可用 `nexplan user password admin <新密码>` 重置。
+
+**怎么给人类用户设置 Web 登录密码？** —— `nexplan user add <id> --kind human
+--password <pw>`（或之后 `nexplan user password <id> <pw>`）。Agent 用户永远不需要密码——
+按 id + 项目成员鉴权。
 
 **不同 Agent 看到的不是同一个看板** —— 请确保每个 Agent 配置里的 `NEXPLAN_BOARD` 一致。
 

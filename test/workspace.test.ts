@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Workspace } from '../src/core/workspace.js';
+import { Git } from '../src/core/git.js';
 
 let dir: string;
 let ws: Workspace;
@@ -194,5 +196,40 @@ describe('legacy migration', () => {
     const item = await ws2.getStore('default').getWorkItem('WI-1');
     expect(item?.title).toBe('Legacy');
     await rm(legacyDir, { recursive: true, force: true });
+  });
+});
+
+describe('git repo ownership', () => {
+  it('creates its own repo when the board lives inside a git repo that ignores it', async () => {
+    const host = await mkdtemp(path.join(tmpdir(), 'nexplan-host-'));
+    try {
+      const hostGit = new Git(host);
+      await hostGit.init({ atCwd: true });
+      await hostGit.run(['config', 'user.name', 'Host']);
+      await hostGit.run(['config', 'user.email', 'host@local']);
+      await writeFile(path.join(host, '.gitignore'), 'board/\n');
+
+      // Board directory sits inside the host repo at an ignored path.
+      const board = path.join(host, 'board');
+      const w = new Workspace({ root: board, agentName: 'test-agent', autoCommit: true });
+      await w.init();
+
+      // The board is its own repo (top-level == board), not the host repo.
+      // (git reports the real path, so compare against realpath to tolerate
+      // /var → /private/var symlinks on macOS.)
+      const { stdout: top } = await new Git(board).run(['rev-parse', '--show-toplevel']);
+      expect(top.trim()).toBe(realpathSync(board));
+
+      // Writes commit cleanly inside the board repo…
+      await w.getStore('default').createWorkItem({ title: 'inside-host' });
+      const { stdout: log } = await new Git(board).run(['log', '--oneline']);
+      expect(log.trim().length).toBeGreaterThan(0);
+
+      // …and never leak into the host repo.
+      const { stdout: status } = await hostGit.run(['status', '--porcelain']);
+      expect(status).not.toMatch(/board/);
+    } finally {
+      await rm(host, { recursive: true, force: true });
+    }
   });
 });

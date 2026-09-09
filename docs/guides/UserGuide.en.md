@@ -22,7 +22,9 @@ It is exposed through **three interfaces** that all share the same store:
 
 1. **CLI** — `nexplan …` (humans, scripts).
 2. **MCP server** — `node dist/mcp/server.js` (agents; 26 `nexplan_*` tools).
-3. **Web dashboard** — `nexplan web` (humans; kanban board, bug tracker, doc viewer).
+3. **Web dashboard** — `nexplan web` (humans; kanban board, bug tracker, doc viewer/history,
+   projects/users admin panel). Humans authenticate with a password; anonymous visitors can
+   only **read** open projects.
 
 ---
 
@@ -112,11 +114,11 @@ board directory for a single command.
 
 | Command | Description |
 |---|---|
-| `nexplan add "<title>" [options]` | Add one work item. `--type`, `--priority`, `--description`, `--assignee`, `--tags a,b`, `--estimate n`, `--fixes-bug BUG-1,BUG-2`, `--manual`, `--json-input` (read items from stdin as JSON). |
+| `nexplan add "<title>" [options]` | Add one work item. `--type`, `--priority`, `--description`, `--assignee`, `--tags a,b`, `--estimate n`, `--fixes-bug BUG-1,BUG-2`, `--doc-link url`, `--manual`, `--json-input` (read items from stdin as JSON). |
 | `nexplan list` / `ls` | List work items. `--status`, `--type`, `--priority`, `--assignee`, `--tags`, `--query`, `--limit`. |
 | `nexplan get <id>` | Full detail of one item (incl. notes, children, links). |
 | `nexplan claim <id> --assignee <name>` | Take ownership: sets `assignee` and status to `in_progress`. Optional `--status`. |
-| `nexplan update <id> [options]` | Edit fields: `--title`, `--description`, `--type`, `--priority`, `--status`, `--assignee`, `--tags`, `--estimate`. |
+| `nexplan update <id> [options]` | Edit fields: `--title`, `--description`, `--type`, `--priority`, `--status`, `--assignee`, `--tags`, `--estimate`, `--doc-link url` (leave empty to clear). |
 | `nexplan done <id> [options]` (`complete`) | Mark done; `--note`, `--no-close-bugs`. Auto-closes bugs listed in `fixesBug`. |
 | `nexplan decompose <parentId> --child "<title>" …` | Split a parent into child backlog items (linked to the parent). |
 | `nexplan note <id> <body>` | Append a progress/context note. |
@@ -166,7 +168,7 @@ nexplan docs history "下单设计"
 | Command | Description |
 |---|---|
 | `nexplan status` | Summary counts by status + recent activity. |
-| `nexplan web [--port n]` | Start the web dashboard (default port 3344). |
+| `nexplan web [--port n] [--host h \| --remote]` | Start the web dashboard (default port 3344). Defaults to `127.0.0.1`; pass `--remote` (or `--host 0.0.0.0`) to let **other machines on your network** open it — the server prints the LAN URLs it is reachable at. |
 
 ### Multi-project
 
@@ -186,8 +188,9 @@ command; it defaults to the workspace's default project.
 | Command | Description |
 |---|---|
 | `nexplan user list` | List registered users. |
-| `nexplan user add <id> [--name n] [--kind human\|agent] [--role admin\|member\|viewer]` | Register a user. |
+| `nexplan user add <id> [--name n] [--kind human\|agent] [--role admin\|member\|viewer] [--password pw]` | Register a user. `--password` gives a human a web-login password (agents are authorized by id, they don't use one). |
 | `nexplan user role <id> <admin\|member\|viewer>` | Change a user's role. |
+| `nexplan user password <id> [<pw>]` | Set or reset a human's web-login password. |
 | `nexplan user rm <id>` | Remove a user. |
 | `nexplan config set-enforce-permissions <true\|false>` | Require registered users for writes; a `viewer` role is read-only. |
 
@@ -197,19 +200,30 @@ With permissions **enforced**, writes require a registered non-viewer user.
 ```bash
 nexplan project new backend --name "后端" --description "服务端"
 nexplan --project backend add "实现下单 API" --priority P0
-nexplan user add claude-code --kind agent --role member
+nexplan user add alice --kind human --role admin --password s3cret   # human → web login
+nexplan user add claude-code --kind agent --role member              # agent → MCP/CLI, no password
+nexplan user password alice new-s3cret                               # reset a password
 nexplan user list
 ```
 
 ### Access control & per-agent config
 
-Permissions work in two layers:
+Access control works in three layers:
 
 1. **Project member roster (always active)** — a project that lists `members` is
    restricted to those members + admins (reads and writes). Empty roster = open.
 2. **Strict mode** (`nexplan config set-enforce-permissions true`) — additionally
    requires registered users, makes `admin` the only role allowed to manage the
    workspace, and makes `viewer` read-only.
+
+   Every workspace auto-bootstraps a default **`admin`** user on init (and re-seeds
+   one when strict mode is enabled), so enabling strict mode can never lock you out
+   of management — you always have an `admin` to operate as.
+3. **Web login (human users)** — the web dashboard authenticates humans with a
+   password. The default `admin` has the initial password `admin` and is forced to
+   change it on first login. Anonymous requests can **read** open projects but must
+   **log in** to write or manage. Agent users have no password — they are authorized
+   by id + project membership (unchanged for CLI/MCP).
 
 Scope an agent to a project and generate its MCP config:
 
@@ -285,7 +299,22 @@ is used; if a project is omitted, `NEXPLAN_PROJECT` (or the default) is used.
 
 ## 7. Web dashboard
 
-Run `nexplan web`, then open `http://127.0.0.1:3344`. It has three tabs:
+Run `nexplan web`, then open `http://127.0.0.1:3344`. By default the dashboard
+listens on `127.0.0.1` only — run `nexplan web --remote` (or `--host 0.0.0.0`) to let
+other machines on your LAN open it; startup then prints the LAN URLs (change the
+default `admin` password before exposing it!). The UI is fully bilingual —
+use the language switcher in the top-right corner (**English / 中文**). Your choice is
+remembered; on the first visit the browser language is detected automatically.
+
+Human users **log in** via the **Log in** button in the top-right corner
+(ID + password). Every workspace guarantees a default **`admin`** user with the
+initial password `admin`; it is forced to **change the password on first login**
+(a “Change password” dialog appears right after login). Once logged in, the header
+shows `name (role)` and a **Log out** button. Anonymous visitors can **read** open
+projects, but every write and management action requires a login — API errors are
+surfaced as a toast.
+
+The dashboard has these tabs:
 
 - **Board** — a kanban by status (`待办 / 待开始 / 进行中 / 评审中 / 完成 / 阻塞`). Click a
   card to open detail: view description, notes, change status, **claim/start**,
@@ -293,16 +322,20 @@ Run `nexplan web`, then open `http://127.0.0.1:3344`. It has three tabs:
   the **+ 新建待办** button to add items manually.
 - **Bugs** — searchable bug list with severity/status badges; **+ 录入缺陷** to report
   one; inline “标记已修”; click a bug to edit severity/status.
-- **Docs** — a document list on the left; select one to view its content, metadata and
+- **Docs** — a document list on the left; select one to view its content (rendered
+  from **Markdown**: headings, lists, tables, code blocks, images, links…), metadata and
   **version history** on the right. **编辑（生成新版本）** updates it as a new version;
   **新建文档** creates one.
+- **Admin** — project statistics and management (see below).
 
 The project selector in the header switches the active project. The **管理 (Admin)**
 tab adds a **project statistics** panel (work-item/bug/doc counts per project, click a
 card to open it) plus project and user management (create/delete projects, set the
-default, set roles, add users, and a strict-permissions toggle).
+default, set roles, add users — the add-user form has an optional password field for
+humans — and a strict-permissions toggle).
 
-The dashboard refreshes automatically every 15 seconds and after each action.
+The dashboard refreshes automatically every 15 seconds and after each action. Web
+login sessions last 7 days (a signed `nexplan_session` cookie).
 
 ---
 
@@ -345,6 +378,9 @@ nexplan docs history "下单设计"            # version list for one doc
 
 CLI/JSON: `--root <path>`, `--project <key>` and `--json` modify behaviour for one invocation.
 
+Web login sessions last 7 days; the cookie-signing secret is generated into
+`<board>/.web-secret` on first start — keep it out of version control.
+
 ---
 
 ## 11. Troubleshooting / FAQ
@@ -357,6 +393,18 @@ writable or git isn’t available. Check `NEXPLAN_BOARD` points to a writable pa
 
 **I changed a doc but the version didn’t bump** — `docs update` bumps the version and
 commits. `docs new` starts at version 1.
+
+**I can’t add or edit anything in the web dashboard** — you are not logged in.
+Anonymous visitors may read open projects, but every write and management action
+requires a login (top-right **Log in**).
+
+**What is the admin password?** — every workspace guarantees a default `admin` user
+with the initial password `admin`, forced to change on first login. Reset it any time
+with `nexplan user password admin <new-password>`.
+
+**How do I give a human a web-login password?** — `nexplan user add <id> --kind human
+--password <pw>` (or later: `nexplan user password <id> <pw>`). Agent users never need
+a password — they are authorized by id + project membership.
 
 **Agents see different boards** — make sure every agent config sets the **same**
 `NEXPLAN_BOARD`.

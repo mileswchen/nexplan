@@ -80,6 +80,16 @@ describe('work items', () => {
     expect(children.map((c) => c.id)).toEqual(['WI-2', 'WI-3']);
   });
 
+  it('stores and updates a design document link', async () => {
+    const item = await store.createWorkItem({ title: 'Auth', docLink: 'https://example.com/design' });
+    expect(item.docLink).toBe('https://example.com/design');
+    const updated = await store.updateWorkItem(item.id, { docLink: 'https://example.com/design-v2' });
+    expect(updated.docLink).toBe('https://example.com/design-v2');
+    // Clear it back to null.
+    const cleared = await store.updateWorkItem(item.id, { docLink: null });
+    expect(cleared.docLink).toBeNull();
+  });
+
   it('applies list filters', async () => {
     await store.createWorkItem({ title: 'A', priority: 'P0', type: 'feature' });
     await store.createWorkItem({ title: 'B', priority: 'P2', type: 'task' });

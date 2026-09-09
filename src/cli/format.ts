@@ -49,6 +49,7 @@ export function formatWorkItem(w: WorkItem): string {
   parts.push(c.dim(`[${w.type}]`));
   parts.push(w.title);
   if (w.assignee) parts.push(c.magenta(`@${w.assignee}`));
+  if (w.docLink) parts.push(c.cyan('🔗'));
   const tags = w.tags?.length ? ` ${w.tags.map((t) => c.dim(`#${t}`)).join(' ')}` : '';
   return parts.join('  ') + tags;
 }
@@ -66,6 +67,7 @@ export function formatWorkItemFull(w: WorkItem): string {
   out.push(`  parent:      ${w.parent ?? '-'}`);
   out.push(`  children:    ${w.children.join(', ') || '-'}`);
   out.push(`  fixes bug:   ${w.fixesBug.join(', ') || '-'}`);
+  out.push(`  doc link:    ${w.docLink ?? '-'}`);
   out.push(`  estimate:    ${w.estimate ?? '-'}`);
   out.push(`  tags:        ${w.tags.join(', ') || '-'}`);
   out.push(`  created:     ${date(w.createdAt)} by ${w.createdBy}`);

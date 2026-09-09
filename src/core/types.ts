@@ -42,6 +42,7 @@ export interface WorkItem {
   tags: string[];
   estimate: number | null; // story points / hours
   fixesBug: string[]; // bug ids fixed by this item
+  docLink: string | null; // URL of the design document for this item
   createdBy: string; // 'user' or agent name
   createdAt: string; // ISO
   updatedAt: string; // ISO

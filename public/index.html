@@ -11,6 +11,12 @@
     --green: #35c26a; --yellow: #f5b942; --red: #f2545b; --cyan: #37b6d6; --magenta: #c66fe0;
     --radius: 10px;
   }
+  /* Light theme (toggle via #theme-btn; persists in localStorage). */
+  html[data-theme="light"] {
+    --bg: #f4f6fb; --panel: #ffffff; --panel2: #eef1f7; --border: #d6dbe6;
+    --text: #24272f; --muted: #676f7d; --accent: #2f6bff; --accent2: #6f5cff;
+    --green: #15803d; --yellow: #b45309; --red: #dc2626; --cyan: #0e7490; --magenta: #a21caf;
+  }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
     background: var(--bg); color: var(--text); font-size: 14px; }
@@ -20,7 +26,8 @@
     background: var(--panel); position: sticky; top: 0; z-index: 20; flex-wrap: wrap; }
   .brand { font-weight: 700; font-size: 18px; letter-spacing: .3px; }
   .brand span { color: var(--accent); }
-  .proj { display: flex; align-items: center; gap: 6px; }
+  .proj { display: flex; align-items: center; gap: 6px; white-space: nowrap; flex-shrink: 0; }
+  .proj .muted { white-space: nowrap; }
   .proj select { background: var(--panel2); border: 1px solid var(--border); color: var(--text);
     padding: 5px 10px; border-radius: 8px; font-size: 13px; }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -69,10 +76,14 @@
   .st.blocked,.st.wontfix { color: var(--red); }
   .assignee { color: var(--magenta); font-size: 12px; }
   .tag { color: var(--muted); font-size: 12px; }
+  .docview, .card-doc { color: var(--accent); cursor: pointer; }
+  .docview { color: var(--accent); cursor: pointer; font-size: 12px; max-width: 55%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card-doc { margin-left: auto; font-size: 13px; text-decoration: none; }
   .role-admin { color: var(--red); } .role-member { color: var(--cyan); } .role-viewer { color: var(--muted); }
   .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
   .toolbar input, .toolbar select { background: var(--panel2); border: 1px solid var(--border); color: var(--text);
-    padding: 6px 10px; border-radius: 8px; font-size: 13px; }
+    padding: 6px 10px; border-radius: 8px; font-size: 13px; height: 38px; width: 210px; flex: 0 0 auto; }
   .toolbar .spacer { flex: 1; }
   .grid2 { display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
   @media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
@@ -111,6 +122,34 @@
     border-radius: 8px; font-size: 13px; box-shadow: 0 4px 18px rgba(0,0,0,.4); display: none;
     white-space: pre-wrap; }
   #toast.show { display: block; }
+  /* Rendered markdown (documents) */
+  .md { line-height: 1.7; font-size: 14px; word-wrap: break-word; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 18px 0 8px; line-height: 1.3; }
+  .md h1 { font-size: 22px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .md h2 { font-size: 18px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .md h3 { font-size: 15px; } .md h4 { font-size: 14px; }
+  .md h1:first-child, .md h2:first-child { margin-top: 0; }
+  .md p { margin: 8px 0; }
+  .md ul, .md ol { margin: 8px 0; padding-left: 26px; }
+  .md li { margin: 3px 0; }
+  .md ul ul, .md ol ol, .md ul ol, .md ol ul { margin: 3px 0; }
+  .md code { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px;
+    background: rgba(127,127,127,.15); padding: 1px 5px; border-radius: 4px; }
+  .md pre.code { background: rgba(127,127,127,.12); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; overflow-x: auto; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px;
+    line-height: 1.5; margin: 10px 0; }
+  .md pre.code code { background: none; padding: 0; font-size: inherit; }
+  .md blockquote { margin: 10px 0; padding: 2px 14px; border-left: 3px solid var(--accent);
+    color: var(--muted); background: rgba(127,127,127,.08); border-radius: 0 6px 6px 0; }
+  .md blockquote p { margin: 6px 0; }
+  .md table { border-collapse: collapse; margin: 10px 0; max-width: 100%; overflow-x: auto; }
+  .md th, .md td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; }
+  .md th { background: var(--panel2); font-weight: 600; }
+  .md tr:nth-child(even) td { background: rgba(127,127,127,.05); }
+  .md a { color: var(--accent); }
+  .md img { max-width: 100%; border-radius: 6px; }
+  .md hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
+  .md del { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -128,6 +167,7 @@
     <option value="en">English</option>
     <option value="zh">中文</option>
   </select>
+  <button class="btn" id="theme-btn" title="Toggle theme" aria-label="Toggle theme">🌙</button>
   <button class="btn" id="login-btn">Log in</button>
   <span class="muted" id="whoami" style="display:none"></span>
   <button class="btn" id="logout-btn" style="display:none">Log out</button>
@@ -220,7 +260,7 @@ const I18N = {
     users: 'Users', new_user: '+ Add user',
     st_backlog: 'Backlog', st_todo: 'Todo', st_in_progress: 'In progress', st_review: 'In review',
     st_done: 'Done', st_blocked: 'Blocked',
-    chips_wi: 'Todo', chips_bugs: 'Bugs', chips_docs: 'Docs', board_empty: 'Empty',
+    chips_wi: 'Work items', chips_bugs: 'Bugs', chips_docs: 'Docs', board_empty: 'Empty',
     w_status: 'Status', w_claim: 'Start / Claim', w_complete: 'Mark done', w_notes: 'Notes',
     w_no_notes: 'No notes', w_note_ph: 'Add a note…', w_note_add: 'Add', close: 'Close',
     claim_prompt: 'Assignee (agent or user):', complete_prompt: 'Completion note:',
@@ -236,7 +276,7 @@ const I18N = {
     col_name: 'Name', col_members: 'Members', col_del: 'Delete', set_default: 'Set as default',
     confirm_del_proj: 'Delete project {x}?', confirm_del_user: 'Delete user {x}?',
     form_new_item: 'New work item', form_title: 'Title', form_type: 'Type', form_priority: 'Priority',
-    form_tags: 'Tags (comma-separated)', form_desc: 'Description', create: 'Create',
+    form_tags: 'Tags (comma-separated)', form_desc: 'Description', form_doc_link: 'Design document link (URL)', create: 'Create', open_doc: 'Open doc', doc_not_found: 'Document not found / cannot open',
     alert_title: 'Please enter a title', form_new_bug: 'Add bug',
     form_evidence: 'Evidence (stack/log)', form_new_doc: 'New document',
     form_new_project: 'New project', form_key: 'Key (e.g. api)', form_name: 'Name',
@@ -259,7 +299,7 @@ const I18N = {
     users: '用户', new_user: '+ 添加用户',
     st_backlog: '待办', st_todo: '待开始', st_in_progress: '进行中', st_review: '评审中',
     st_done: '完成', st_blocked: '阻塞',
-    chips_wi: '待办', chips_bugs: '缺陷', chips_docs: '文档', board_empty: '空',
+    chips_wi: '工作项', chips_bugs: '缺陷', chips_docs: '文档', board_empty: '空',
     w_status: '状态', w_claim: '开始 / 认领', w_complete: '标记完成', w_notes: '备注',
     w_no_notes: '暂无备注', w_note_ph: '添加备注…', w_note_add: '添加', close: '关闭',
     claim_prompt: '认领人（agent 或 user）：', complete_prompt: '完成备注：',
@@ -275,7 +315,7 @@ const I18N = {
     col_name: '名称', col_members: '成员', col_del: '删除', set_default: '设为默认',
     confirm_del_proj: '删除项目 {x} ？', confirm_del_user: '删除用户 {x} ？',
     form_new_item: '新建待办', form_title: '标题', form_type: '类型', form_priority: '优先级',
-    form_tags: '标签（逗号分隔）', form_desc: '描述', create: '创建',
+    form_tags: '标签（逗号分隔）', form_desc: '描述', form_doc_link: '设计文档链接', create: '创建', open_doc: '打开文档', doc_not_found: '未找到文档，无法打开',
     alert_title: '请输入标题', form_new_bug: '录入缺陷',
     form_evidence: '证据（堆栈/日志）', form_new_doc: '新建文档',
     form_new_project: '新建项目', form_key: 'Key（如 api）', form_name: '名称',
@@ -393,6 +433,7 @@ function cardHtml(i) {
       <span class="badge pri-${esc(i.priority)}">${esc(i.priority)}</span>
       ${i.assignee ? `<span class="assignee">@${esc(i.assignee)}</span>` : ''}
       ${(i.tags||[]).slice(0,2).map(t => `<span class="tag">#${esc(t)}</span>`).join('')}
+      ${i.docLink ? `<a href="#" class="card-doc" data-doclink="${esc(i.docLink)}" title="${esc(i.docLink)}">🔗</a>` : ''}
     </div>
   </div>`;
 }
@@ -400,6 +441,9 @@ function cardHtml(i) {
 function bindCards() {
   document.querySelectorAll('.card').forEach(c => {
     c.onclick = () => openItem(c.dataset.id);
+  });
+  document.querySelectorAll('.card [data-doclink]').forEach(a => {
+    a.onclick = (e) => { e.stopPropagation(); e.preventDefault(); openDocLink(a.dataset.doclink); };
   });
 }
 
@@ -415,6 +459,11 @@ async function openItem(id) {
       ${i.assignee ? `<span class="assignee">@${esc(i.assignee)}</span>` : ''}
     </div>
     ${i.description ? `<p class="muted">${esc(i.description)}</p>` : ''}
+    <label>${t('form_doc_link')}</label>
+    <div class="row" style="align-items:center">
+      <input type="text" id="w-doc" value="${esc(i.docLink||'')}" placeholder="https://…" style="flex:1" />
+      ${i.docLink ? `<a href="#" class="docview" id="w-doc-open" title="${esc(i.docLink)}">${t('open_doc')} ↗</a>` : ''}
+    </div>
     <div class="row">
       <label style="margin:0">${t('w_status')}</label>
       <select id="w-status">${STATUSES.map(s => `<option value="${s}" ${s===i.status?'selected':''}>${statusLabel(s)}</option>`).join('')}</select>
@@ -433,6 +482,12 @@ async function openItem(id) {
     await api.send('/api/workitems/' + id + '?project=' + encodeURIComponent(project), 'PATCH', { status: e.target.value, author: 'user' });
     await refresh();
   };
+  $('#w-doc').onchange = async (e) => {
+    await api.send('/api/workitems/' + id + '?project=' + encodeURIComponent(project), 'PATCH', { docLink: e.target.value.trim() || null, author: 'user' });
+    await refresh();
+  };
+  const docOpen = $('#w-doc-open');
+  if (docOpen) docOpen.onclick = (e) => { e.preventDefault(); openDocLink($('#w-doc').value || i.docLink); };
   $('#w-claim').onclick = async () => {
     const asg = prompt(t('claim_prompt'),'user');
     if (asg) { await api.send(`/api/workitems/${id}/claim?project=${encodeURIComponent(project)}`, 'POST', { assignee: asg }); await refresh(); }
@@ -452,6 +507,74 @@ async function openItem(id) {
 }
 
 function closeModal() { $('#modal-bg').classList.remove('open'); }
+
+// A design-document link can be an external URL, a bare NexPlan doc slug, or a
+// reference like "slug=<slug>" / "doc=<slug>". Normalize these before use.
+function docIsExternal(v) { return /^https?:\/\//i.test(v) || /^mailto:/i.test(v); }
+function extractDocSlug(v) {
+  const m = /^(?:slug|doc|docs?)\s*=\s*(.+)$/i.exec(v.trim());
+  return (m ? m[1] : v).trim().replace(/\.md$/i, '');
+}
+function resolveDocLinkValue(v) {
+  v = String(v || '').trim();
+  if (!v) return null;
+  if (docIsExternal(v)) return { external: v };
+  return { slug: extractDocSlug(v), raw: v };
+}
+// Compare a doc slug/title loosely (ignore case, spaces, hyphens, underscores, dots).
+function normDocRef(s) { return String(s || '').toLowerCase().replace(/[\s_.\-]+/g, ''); }
+async function listDocs(proj) {
+  try { return (await api.get('/api/docs?project=' + encodeURIComponent(proj))) || []; }
+  catch (e) { return []; }
+}
+// Locate a NexPlan doc for a link reference. Tries the current project first
+// (by exact slug, then by normalized slug/title), then falls back to other
+// projects so a doc referenced from a different project still opens.
+async function findNexplanDoc(raw) {
+  const ref = extractDocSlug(raw);
+  if (!ref) return null;
+  const byRef = (d) =>
+    d.slug === ref ||
+    normDocRef(d.slug) === normDocRef(ref) ||
+    normDocRef(d.meta.title) === normDocRef(ref);
+  const current = await listDocs(project);
+  const hit = (current || []).find(byRef);
+  if (hit) return hit;
+  // The list may be the source of truth but a single-fetch can still resolve.
+  try {
+    const doc = await api.get('/api/docs/' + encodeURIComponent(ref) + '?project=' + encodeURIComponent(project));
+    if (doc && doc.slug) return doc;
+  } catch (e) { /* keep looking */ }
+  try {
+    const w = await api.get('/api/workspace');
+    for (const p of (w.projects || [])) {
+      if (String(p.key) === project) continue;
+      const found = (await listDocs(p.key)).find(byRef);
+      if (found) return found;
+    }
+  } catch (e) { /* allow the caller to show a clear message */ }
+  return null;
+}
+async function openDocLink(v) {
+  const norm = resolveDocLinkValue(v);
+  if (!norm) return;
+  if (norm.external) { window.open(norm.external, '_blank', 'noopener'); return; }
+  // A "slug=<https://...>" reference is really an external URL.
+  if (docIsExternal(norm.slug)) { window.open(norm.slug, '_blank', 'noopener'); return; }
+  const doc = await findNexplanDoc(norm.raw || norm.slug);
+  if (doc) { openDocModal(doc); return; }
+  // Never navigate to the dashboard shell: report clearly instead.
+  notify(t('doc_not_found') + '：' + (norm.raw || norm.slug));
+}
+function openDocModal(doc) {
+  const modal = $('#modal');
+  modal.innerHTML = `
+    <h3>${esc(doc.meta.title)} <span class="muted">${esc(doc.slug)} · v${doc.meta.version}</span></h3>
+    <div class="md">${renderMarkdown(doc.content)}</div>
+    <div class="row" style="margin-top:14px"><button class="btn" id="doc-modal-close">${t('close')}</button></div>`;
+  $('.modal-bg').classList.add('open');
+  $('#doc-modal-close').onclick = closeModal;
+}
 
 async function refresh() {
   await loadSummary();
@@ -522,6 +645,135 @@ async function openBug(id) {
   };
 }
 
+// [md renderer] Self-contained, dependency-free, XSS-safe markdown → HTML.
+function escMd(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function mdUrl(u) {
+  u = String(u).trim();
+  // Only allow safe URL schemes / anchors / relative paths, no quotes/spaces.
+  return /^(https?:|mailto:|#|\/|\.\.?\/)/i.test(u) && !/[\s"'<>]/.test(u) ? escMd(u) : '#';
+}
+function mdInline(t) {
+  const images = [];
+  t = t.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_, alt, src) => {
+    images.push(`<img src="${mdUrl(src)}" alt="${escMd(alt)}" loading="lazy" />`);
+    return `\u0001${images.length - 1}\u0001`;
+  });
+  t = t.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, label, url) =>
+    `<a href="${mdUrl(url)}" target="_blank" rel="noopener">${label}</a>`);
+  t = t.replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`);
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+  t = t.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+  return t.replace(/\u0001(\d+)\u0001/g, (_, i) => images[+i]);
+}
+
+/** Build a <ul>/<ol> starting at lines[i]. Items at `base` indentation level;
+ *  deeper-indented marker lines become nested lists. Returns { html, next }. */
+function mdList(lines, i) {
+  const first = /^(\s*)([-*+]|\d+\.)[ \t]+/.exec(lines[i]);
+  if (!first) return { html: '', next: i };
+  const base = first[1].length;
+  let kind = /^\d/.test(first[2]) ? 'ol' : 'ul';
+  const items = [];
+  while (i < lines.length) {
+    const m = /^(\s*)([-*+]|\d+\.)[ \t]+(.*)$/.exec(lines[i]);
+    if (!m) break;
+    const ind = m[1].length;
+    if (ind < base) break;
+    if (ind === base) {
+      const cur = /^\d/.test(m[2]) ? 'ol' : 'ul';
+      if (cur !== kind) break; // switching bullet ↔ number ends this list
+      let j = i + 1;
+      const deep = [];
+      while (j < lines.length) {
+        const dm = /^(\s*)([-*+]|\d+\.)[ \t]+/.exec(lines[j]);
+        if (dm && dm[1].length > base) { deep.push(lines[j]); j++; } else break;
+      }
+      const inner = deep.length ? mdList(deep, 0).html : '';
+      items.push(`<li>${mdInline(escMd(m[3]))}${inner}</li>`);
+      i = j;
+    } else {
+      break; // deeper line without a parent item: stop
+    }
+  }
+  return { html: `<${kind}>${items.join('')}</${kind}>`, next: i };
+}
+
+/** Turn markdown text into (already HTML-escaped) block HTML. */
+function renderMarkdown(src) {
+  const text = String(src || '').replace(/\r\n?/g, '\n').replace(/^\uFEFF/, '');
+  if (!text.trim()) return '';
+  // Ignore an accidental YAML frontmatter block (content is normally body-only).
+  const lines = text.split('\n');
+  const html = [];
+  let i = 0, para = [];
+  const flushPara = () => {
+    if (!para.length) return;
+    html.push(`<p>${mdInline(escMd(para.join(' ')))}</p>`);
+    para = [];
+  };
+  while (i < lines.length) {
+    const line = lines[i];
+    const tline = line.trim();
+    if (!tline) { flushPara(); i++; continue; }
+
+    // fenced code block
+    if (/^```/.test(tline)) {
+      flushPara();
+      const buf = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i].trim())) { buf.push(lines[i]); i++; }
+      i++; // skip closing fence
+      html.push(`<pre class="code"><code>${escMd(buf.join('\n'))}</code></pre>`);
+      continue;
+    }
+    // ATX heading
+    const h = /^(#{1,6})\s+(.*)$/.exec(tline);
+    if (h) { flushPara(); html.push(`<h${h[1].length}>${mdInline(escMd(h[2]))}</h${h[1].length}>`); i++; continue; }
+    // horizontal rule
+    if (/^([-*_])\1{2,}$/.test(tline)) { flushPara(); html.push('<hr />'); i++; continue; }
+    // blockquote (consecutive > lines)
+    if (tline.startsWith('>')) {
+      flushPara();
+      const buf = [];
+      while (i < lines.length && lines[i].trim().startsWith('>')) {
+        buf.push(lines[i].trim().replace(/^>\s?/, ''));
+        i++;
+      }
+      html.push(`<blockquote>${mdInline(escMd(buf.join(' ')))}</blockquote>`);
+      continue;
+    }
+    // list (top-level marker without leading indentation; nesting handled by mdList)
+    if (/^([-*+]|\d+\.)[ \t]+/.test(line)) {
+      flushPara();
+      const r = mdList(lines, i);
+      html.push(r.html);
+      i = r.next;
+      continue;
+    }
+    // table (header line + separator line)
+    if (line.includes('|') && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes('-')) {
+      flushPara();
+      const splitRow = (r) => r.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+      const head = splitRow(lines[i]);
+      let j = i + 2;
+      const rows = [];
+      while (j < lines.length && lines[j].includes('|')) { rows.push(splitRow(lines[j])); j++; }
+      html.push('<table><thead><tr>' + head.map((c) => `<th>${mdInline(escMd(c))}</th>`).join('') + '</tr></thead><tbody>' +
+        rows.map((r) => '<tr>' + r.map((c) => `<td>${mdInline(escMd(c))}</td>`).join('') + '</tr>').join('') + '</tbody></table>');
+      i = j;
+      continue;
+    }
+    para.push(line);
+    i++;
+  }
+  flushPara();
+  return html.join('\n');
+}
+// [/md renderer]
+
 // ---------------- docs ----------------
 async function loadDocsList() {
   const docs = await api.get('/api/docs?project=' + encodeURIComponent(project));
@@ -549,7 +801,7 @@ async function openDoc(slug) {
       <button class="btn sm" id="doc-edit">${t('doc_edit')}</button>
       <button class="btn sm" id="doc-status">${t('doc_approve')}</button>
     </div>
-    <div class="doc-body" id="doc-content">${esc(d.content)}</div>
+    <div class="md" id="doc-content">${renderMarkdown(d.content)}</div>
     <h3 style="margin:16px 0 8px">${t('doc_history')}</h3>
     <div class="doc-body" style="min-height:auto">${hist.map(v => `v${v.version} · ${v.sha.slice(0,8)} · ${esc(v.author)} · ${esc(new Date(v.date).toLocaleString())}<br>${esc(v.message)}`).join('<br><br>') || t('doc_no_versions')}</div>`;
   $('#doc-edit').onclick = () => editDoc(slug, d.content);
@@ -649,6 +901,7 @@ function newItemForm() {
     <div class="row"><div style="flex:1"><label>${t('form_priority')}</label><select id="n-pri">${['P0','P1','P2','P3'].map(p=>`<option>${p}</option>`).join('')}</select></div>
       <div style="flex:1"><label>${t('form_tags')}</label><input type="text" id="n-tags" /></div></div>
     <label>${t('form_desc')}</label><textarea id="n-desc"></textarea>
+    <label>${t('form_doc_link')}</label><input type="text" id="n-doc" placeholder="https://…" />
     <div class="row" style="margin-top:12px"><button class="btn" id="n-cancel">${t('cancel')}</button>
       <button class="btn primary" id="n-save">${t('create')}</button></div>`);
   $('#n-cancel').onclick = closeModalX;
@@ -656,7 +909,8 @@ function newItemForm() {
     const title = $('#n-title').value.trim();
     if (!title) return alert(t('alert_title'));
     await api.send('/api/workitems?project=' + encodeURIComponent(project), 'POST', { title, type: $('#n-type').value, priority: $('#n-pri').value,
-      tags: $('#n-tags').value.split(',').map(t=>t.trim()).filter(Boolean), description: $('#n-desc').value, author: 'user' });
+      tags: $('#n-tags').value.split(',').map(t=>t.trim()).filter(Boolean), description: $('#n-desc').value,
+      docLink: $('#n-doc').value.trim() || null, author: 'user' });
     closeModalX(); await refresh();
   };
 }
@@ -839,6 +1093,18 @@ $('#b-severity').onchange = loadBugs;
 $('#b-status').onchange = loadBugs;
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+// ---- theme (dark default / light toggle, persisted) ----
+const LS_THEME = 'nexplan_theme';
+function currentTheme() { return localStorage.getItem(LS_THEME) === 'light' ? 'light' : 'dark'; }
+function applyTheme(th) {
+  document.documentElement.setAttribute('data-theme', th);
+  localStorage.setItem(LS_THEME, th);
+  const b = $('#theme-btn');
+  if (b) b.textContent = th === 'light' ? '☀️' : '🌙';
+}
+$('#theme-btn').onclick = () => applyTheme(currentTheme() === 'light' ? 'dark' : 'light');
+applyTheme(currentTheme());
 
 document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
 $('#lang-select').value = lang;

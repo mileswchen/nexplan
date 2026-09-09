@@ -32,14 +32,16 @@ nexplan done WI-1 --note "完成"                                  # 标记完�
 nexplan project new api --name "API"                             # 新建项目
 nexplan --project api add "订单接口" --priority P0               # 在 api 项目录入
 nexplan user add claude-code --kind agent --role member          # 注册用户
-nexplan web                                                      # 打开看板
+nexplan user add alice --kind human --role admin --password pw   # 人类用户 → Web 登录
+nexplan user password alice newpw                                # 重置登录密码
+nexplan web                                                      # 打开看板（默认 admin / admin 登录）
 ```
 
 ## 工作项 / Work items
 
 | 命令 | 说明 |
 |---|---|
-| `nexplan add "<t>" [--type t] [--priority P] [--description d] [--assignee n] [--tags a,b] [--estimate n] [--fixes-bug B1,B2] [--manual]` | 新增工作项 |
+| `nexplan add "<t>" [--type t] [--priority P] [--description d] [--assignee n] [--tags a,b] [--estimate n] [--fixes-bug B1,B2] [--doc-link url] [--manual]` | 新增工作项 |
 | `nexplan list [--status s] [--type t] [--priority p] [--assignee n] [--tags a,b] [--query q] [--limit n]` | 列出 |
 | `nexplan get <id>` | 详情 |
 | `nexplan claim <id> --assignee <n>` | 认领（→ in_progress）|
@@ -72,7 +74,7 @@ nexplan web                                                      # 打开看板
 
 ```
 nexplan status           # 汇总 + 近期活动
-nexplan web [--port n]   # Web 看板（默认 3344）
+nexplan web [--port n] [--remote]   # Web 看板（默认 3344；--remote = 允许局域网其他机器访问）
 ```
 
 ## 项目与用户 / Projects & users
@@ -80,12 +82,14 @@ nexplan web [--port n]   # Web 看板（默认 3344）
 | 命令 | 说明 |
 |---|---|
 | `nexplan project list` / `new <key> [--name n] [--members a,b]` / `use <key>` / `show <key>` / `rm <key>` | 项目管理 |
-| `nexplan user list` / `add <id> [--kind human\|agent] [--role r]` / `role <id> <admin\|member\|viewer>` / `rm <id>` | 用户与角色 |
+| `nexplan user list` / `add <id> [--kind human\|agent] [--role r] [--password pw]` / `role <id> <admin\|member\|viewer>` / `password <id> [<pw>]` / `rm <id>` | 用户与角色（`--password` = Web 登录密码，给人类用户）|
 | `nexplan config set-enforce-permissions <true\|false>` | 仅限已注册用户写入；`admin` 才能管理；`viewer` 只读 |
 | `nexplan agent config <id> [--project key]` | 打印限定到 Agent+项目的 MCP 配置 |
 
 **访问控制**：有 `members` 名单的项目仅限成员 + admin 访问；空名单=公开。严格模式开启后，
-管理需 `admin` 角色。授权示例：`nexplan user add alice --role member; nexplan project new api --members alice; nexplan agent config alice --project api`。
+管理需 `admin` 角色（每个工作区自动引导默认 `admin`，初始密码 `admin`，首次登录强制改密）。
+Web 看板需登录后才能写入/管理；匿名只能读公开项目；界面右上角可切换 English / 中文。
+授权示例：`nexplan user add alice --role member; nexplan project new api --members alice; nexplan agent config alice --project api`。
 
 ## MCP（给 Agent）/ For agents
 

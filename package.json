@@ -18,6 +18,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev:mcp": "tsx src/mcp/server.ts",
+    "dev:mcp:http": "tsx src/mcp/http-server.ts",
+    "mcp:http": "node dist/mcp/http-server.js",
     "dev:web": "tsx src/web/server.ts",
     "cli": "tsx src/cli/index.ts",
     "test": "vitest run",
