@@ -62,7 +62,7 @@ node dist/cli/index.js list
 ## The three interfaces
 
 - **CLI** (`nexplan …`) — humans and scripting.
-- **MCP server** (`node dist/mcp/server.js`) — agents. Exposes 27 `nexplan_*` tools.
+- **MCP server** (`node dist/mcp/server.js`) — agents. Exposes 28 `nexplan_*` tools.
 - **Web dashboard** (`nexplan web`) — humans: kanban board, bug tracker, doc viewer/history, and a projects/users admin panel.
 
 All three share the same git-backed workspace + `Store`, so they are fully consistent.
@@ -116,7 +116,7 @@ nexplan bug add "<title>" [--severity s] [--evidence e] [--manual] [--project ke
 nexplan bug list [--status s] [--severity s] [--query q] [--project key]
 nexplan bug get <id> [--project key]
 nexplan bug update <id> [--status s] [--severity s] [--assignee name] [--project key]
-nexplan docs list | docs show <slug> | docs new <title> | docs update <slug> | docs history <slug> | docs diff <slug> <shaA> <shaB>   [--project key]
+nexplan docs list | docs show <slug> | docs new <title> | docs update <slug> | docs history <slug> | docs diff <slug> <shaA> <shaB> | docs comment <slug> <body>   [--project key]
 nexplan status [--project key]
 nexplan web [--port n] [--host h | --remote]   # --remote = 0.0.0.0, allow other machines (prints LAN URLs)
 

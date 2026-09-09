@@ -173,6 +173,20 @@ describe('docs', () => {
     expect(updated.content).toBe('body v2');
   });
 
+  it('adds and lists doc comments without bumping the doc version', async () => {
+    const doc = await store.createDoc({ title: 'Design', body: 'v1' });
+    const c1 = await store.addDocComment(doc.slug, 'first', 'alice');
+    const c2 = await store.addDocComment(doc.slug, 'second', 'bob');
+    expect(c1.author).toBe('alice');
+    const list = await store.listDocComments(doc.slug);
+    expect(list.map((c) => c.body)).toEqual(['first', 'second']);
+    // Comments live in a separate file and do not change the doc content/version.
+    expect((await store.getDoc(doc.slug))?.content).toBe('v1\n');
+    expect((await store.getDoc(doc.slug))?.meta.version).toBe(1);
+    // A comment on a missing doc errors.
+    await expect(store.addDocComment('nope', 'x', 'alice')).rejects.toThrow(/not found/);
+  });
+
   it('reports full version history via git', async () => {
     const doc = await store.createDoc({ title: 'Decision', type: 'decision', body: 'version one' });
     await store.updateDoc(doc.slug, { content: 'version two' });

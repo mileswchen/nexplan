@@ -102,6 +102,14 @@ export interface DocVersion {
   message: string;
 }
 
+/** A user/agent comment on a document (kept separate from the doc's versioned body). */
+export interface DocComment {
+  id: string;
+  author: string;
+  body: string;
+  at: string; // ISO
+}
+
 export interface BoardSummary {
   workItems: Record<string, number>;
   bugs: Record<string, number>;

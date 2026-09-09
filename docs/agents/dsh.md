@@ -43,7 +43,7 @@ env:
   NEXPLAN_AGENT:  dsh
 ```
 
-The 27 `nexplan_*` tools then appear in dsh's tool list.
+The 28 `nexplan_*` tools then appear in dsh's tool list.
 
 ## Recommended habit for dsh
 

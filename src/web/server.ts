@@ -490,6 +490,25 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
     }
   });
 
+  app.get('/api/docs/:slug/comments', async (req, res, next) => {
+    try {
+      res.json(await (await storeFor(req)).listDocComments(req.params.slug));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/docs/:slug/comments', async (req, res, next) => {
+    try {
+      const { body } = req.body;
+      if (!body || !String(body).trim()) return res.status(400).json({ error: 'comment body required' });
+      // Commenting requires a project member or admin (the write gate).
+      res.status(201).json(await (await storeFor(req, true)).addDocComment(req.params.slug, String(body), me(req)));
+    } catch (e) {
+      next(e);
+    }
+  });
+
   app.post('/api/docs', async (req, res, next) => {
     try {
       const { author: _author, ...input } = req.body;

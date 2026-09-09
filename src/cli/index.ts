@@ -398,6 +398,15 @@ docs
     process.stdout.write(d || '(no diff)\n');
   });
 
+docs
+  .command('comment <slug> <body>')
+  .description('Add a comment to a document (only a project member or admin).')
+  .action(async (slug: string, body: string) => {
+    const c = await (await store(true)).addDocComment(slug, body);
+    if (program.opts().json) return printJson(c);
+    out(`commented on ${slug}: ${c.body}\n`);
+  });
+
 // ---- board -------------------------------------------------------------------
 
 program

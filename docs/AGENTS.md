@@ -50,7 +50,7 @@ workspace also auto-bootstraps a default `admin` (initial password `admin`, forc
 change on first login), so enabling strict mode
 (`nexplan config set-enforce-permissions true`) can never lock out management.
 
-## The 27 tools
+## The 28 tools
 
 Most tools accept an optional `project` argument (defaults to `NEXPLAN_PROJECT` or the
 workspace default).
@@ -69,6 +69,7 @@ workspace default).
 | `nexplan_docs_create` | Record a design/decision/ADR document |
 | `nexplan_docs_update` | Update a doc → new version |
 | `nexplan_docs_history` / `nexplan_docs_diff` | Version history / diff |
+| `nexplan_docs_comment` | Comment on a doc (project member/admin only) |
 | `nexplan_bug_add` | Report a bug you discovered (with evidence) |
 | `nexplan_bug_list` / `nexplan_bug_get` / `nexplan_bug_update` | Track bugs |
 | `nexplan_status` | Board summary + recent activity |

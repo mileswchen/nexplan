@@ -11,6 +11,7 @@ import {
   BugSeverity,
   BugStatus,
   Doc,
+  DocComment,
   DocMeta,
   DocType,
   DocVersion,
@@ -176,6 +177,9 @@ export class Store {
   }
   private docPath(slug: string): string {
     return path.join(this.dirs.docs, `${slug}.md`);
+  }
+  private docCommentsPath(slug: string): string {
+    return path.join(this.dirs.docs, `${slug}.comments.json`);
   }
 
   private async nextId(prefix: 'WI' | 'BUG'): Promise<string> {
@@ -668,6 +672,32 @@ export class Store {
   async docDiff(slug: string, shaA: string, shaB: string): Promise<string> {
     const rel = path.join('docs', `${slug}.md`);
     return this.git.diffFile(rel, shaA, shaB);
+  }
+
+  // ------------------------------------------------------------------ comments
+
+  /** List a document's comments, oldest first. */
+  async listDocComments(slug: string): Promise<DocComment[]> {
+    const list = await this.readJson<DocComment[]>(this.docCommentsPath(slug));
+    return Array.isArray(list) ? list : [];
+  }
+
+  /**
+   * Append a comment to a document. Comments live in a separate
+   * `<slug>.comments.json` file so they never touch the versioned body/history.
+   * Permission checks live in the caller (see `Workspace`/the MCP/web/CLI gates).
+   */
+  async addDocComment(slug: string, body: string, author?: string): Promise<DocComment> {
+    const doc = await this.getDoc(slug);
+    if (!doc) throw new Error(`doc not found: ${slug}`);
+    const updater = author ?? this.agentName;
+    const comment: DocComment = { id: randomUUID(), author: updater, body: body.trim(), at: NOW() };
+    return this.tx(async () => {
+      const list = await this.listDocComments(slug);
+      list.push(comment);
+      await this.writeJson(this.docCommentsPath(slug), list);
+      return comment;
+    }, `doc: comment ${slug}`);
   }
 
   // -------------------------------------------------------------- board board

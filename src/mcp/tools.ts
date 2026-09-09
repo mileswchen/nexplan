@@ -357,6 +357,26 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     },
   );
 
+  server.registerTool(
+    'nexplan_docs_comment',
+    {
+      title: 'Comment on a document',
+      description:
+        'Append a comment to a document (kept separate from the versioned body). ' +
+        'Only a project member or admin can comment.',
+      inputSchema: z.object({
+        slug: z.string(),
+        body: z.string().min(1),
+        author: z.string().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args, { write: true });
+      return ok(await store.addDocComment(args.slug, args.body, actor));
+    },
+  );
+
   // ------------------------------------------------------------------- bugs
 
   server.registerTool(

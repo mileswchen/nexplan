@@ -49,7 +49,7 @@ describe('MCP server tools', () => {
     expect(names).toContain('nexplan_agent_next');
     expect(names).toContain('nexplan_project_create');
     expect(names).toContain('nexplan_user_add');
-    expect(names.length).toBe(27);
+    expect(names.length).toBe(28);
   });
 
   it('adds a backlog item and lists it', async () => {
@@ -112,6 +112,21 @@ describe('MCP server tools', () => {
     const hist = await call('nexplan_docs_history', { slug });
     expect((hist.structuredContent as any).items).toHaveLength(2);
     expect((hist.structuredContent as any).items[0].version).toBe(2);
+  });
+
+  it('adds comments to a doc, restricted to project members/admins', async () => {
+    await call('nexplan_user_add', { id: 'alice', kind: 'human', role: 'member' });
+    await call('nexplan_project_create', { key: 'team', name: 'Team', members: ['alice'], author: 'alice' });
+    const doc = await call('nexplan_docs_create', { title: 'Design', body: 'body', author: 'alice', project: 'team' });
+    const slug = (doc.structuredContent as any).slug;
+    // A project member (the creator) can comment.
+    const c = await call('nexplan_docs_comment', { slug, body: 'Looks good', author: 'alice', project: 'team' });
+    expect(c.isError).toBeFalsy();
+    expect((c.structuredContent as any).author).toBe('alice');
+    // A non-member cannot comment on a rostered project.
+    const denied = await call('nexplan_docs_comment', { slug, body: 'nope', author: 'bob', project: 'team' });
+    expect(denied.isError).toBeTruthy();
+    expect(denied.content[0].text).toMatch(/not a project member/);
   });
 
   it('reports status and suggests next work', async () => {

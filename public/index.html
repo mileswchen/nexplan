@@ -279,6 +279,8 @@ const I18N = {
     doc_history: 'Version history', doc_no_versions: 'No versions',
     doc_edit_title: 'Edit document (creates a new version)', doc_content: 'Markdown content',
     doc_readonly: 'Read-only (join this project or ask an admin to edit)',
+    doc_comments: 'Comments', doc_comment_ph: 'Add a comment…', doc_comment_add: 'Comment',
+    doc_no_comments: 'No comments yet',
     cancel: 'Cancel', doc_save_version: 'Save as new version',
     stat_todo: 'Todo', stat_inprog: 'In progress', stat_done: 'Done', stat_bugs: 'Bugs',
     stat_docs: 'Docs', stat_members: 'Members', stat_empty: 'No data',
@@ -320,6 +322,8 @@ const I18N = {
     doc_history: '版本历史', doc_no_versions: '暂无版本',
     doc_edit_title: '编辑文档（将创建新版本）', doc_content: 'Markdown 内容',
     doc_readonly: '只读（加入该项目或联系管理员以编辑）',
+    doc_comments: '评论', doc_comment_ph: '添加评论…', doc_comment_add: '评论',
+    doc_no_comments: '暂无评论',
     cancel: '取消', doc_save_version: '保存为新版本',
     stat_todo: '待办', stat_inprog: '进行中', stat_done: '已完成', stat_bugs: '缺陷',
     stat_docs: '文档', stat_members: '成员', stat_empty: '暂无数据',
@@ -881,6 +885,7 @@ async function openDoc(slug) {
   const q = 'project=' + encodeURIComponent(project);
   const d = await api.get('/api/docs/' + s + '?' + q);
   const hist = await api.get('/api/docs/' + s + '/history?' + q);
+  const comments = await api.get('/api/docs/' + s + '/comments?' + q);
   const canEdit = await canEditDocs();
   $('#doc-view').innerHTML = `
     <div class="row">
@@ -896,12 +901,22 @@ async function openDoc(slug) {
     </div>
     <div class="md" id="doc-content">${renderMarkdown(d.content)}</div>
     <h3 style="margin:16px 0 8px">${t('doc_history')}</h3>
-    <div class="doc-body" style="min-height:auto">${hist.map(v => `v${v.version} · ${v.sha.slice(0,8)} · ${esc(v.author)} · ${esc(new Date(v.date).toLocaleString())}<br>${esc(v.message)}`).join('<br><br>') || t('doc_no_versions')}</div>`;
+    <div class="doc-body" style="min-height:auto">${hist.map(v => `v${v.version} · ${v.sha.slice(0,8)} · ${esc(v.author)} · ${esc(new Date(v.date).toLocaleString())}<br>${esc(v.message)}`).join('<br><br>') || t('doc_no_versions')}</div>
+    <h3 style="margin:16px 0 8px">${t('doc_comments')} <span class="count">${comments.length}</span></h3>
+    <div id="doc-comments">${comments.map(c => `<div class="note">${esc(c.body)} <span class="who">— ${esc(c.author)} ${esc(new Date(c.at).toLocaleString())}</span></div>`).join('') || `<div class="empty">${t('doc_no_comments')}</div>`}</div>
+    ${canEdit ? `<div class="row" style="margin-top:10px"><input type="text" id="comment-input" placeholder="${t('doc_comment_ph')}" /><button class="btn" id="comment-add">${t('doc_comment_add')}</button></div>` : ''}`;
   const editBtn = $('#doc-edit');
   if (editBtn) editBtn.onclick = () => editDocInline(slug, d.content, d.meta);
   const statusBtn = $('#doc-status');
   if (statusBtn) statusBtn.onclick = async () => {
     await api.send('/api/docs/' + s + '?' + q, 'PATCH', { status: 'approved', author: 'user' });
+    await openDoc(slug); await refresh();
+  };
+  const commentInput = $('#comment-input');
+  if (commentInput) $('#comment-add').onclick = async () => {
+    const v = commentInput.value.trim();
+    if (!v) return;
+    await api.send('/api/docs/' + s + '/comments?' + q, 'POST', { body: v, author: 'user' });
     await openDoc(slug); await refresh();
   };
   renderMermaid();

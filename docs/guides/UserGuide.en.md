@@ -157,6 +157,7 @@ nexplan bug update BUG-1 --status in_progress --assignee codex
 | `nexplan docs update <slug> [options]` | Update: `--content`, `--title`, `--type`, `--status`, `--tags`. **Bumps the version** and records a git commit. |
 | `nexplan docs history <slug>` | Show version history (newest first). |
 | `nexplan docs diff <slug> <shaA> <shaB>` | Diff two versions by commit sha (from `history`). |
+| `nexplan docs comment <slug> <body>` | Add a comment to a doc (project member/admin only). |
 
 ```bash
 nexplan docs new "下单设计" --type design --body "# 设计\n\n走队列"
@@ -261,7 +262,7 @@ A cross-agent overview: [`docs/AGENTS.md`](AGENTS.md).
 > If an agent can’t load MCP servers, it can drive the exact same board by shelling
 > out to the `nexplan` CLI (Step 5).
 
-### The 27 tools
+### The 28 tools
 
 Most tools accept an optional `project` argument (defaults to `$NEXPLAN_PROJECT` or
 the workspace default).
@@ -280,6 +281,7 @@ the workspace default).
 | `nexplan_docs_create` | Record a design/decision/ADR document |
 | `nexplan_docs_update` | Update a doc → new version |
 | `nexplan_docs_history` / `nexplan_docs_diff` | Version history / diff |
+| `nexplan_docs_comment` | Comment on a doc (project member/admin only) |
 | `nexplan_bug_add` | Report a bug you discovered (with evidence) |
 | `nexplan_bug_list` / `nexplan_bug_get` / `nexplan_bug_update` | Track bugs |
 | `nexplan_status` | Board summary + recent activity |
@@ -327,7 +329,8 @@ The dashboard has these tabs:
 - **Docs** — a document list on the left; select one to view its content (rendered
   from **Markdown**: headings, lists, tables, code blocks, images, links… and
   **Mermaid** ` ```mermaid ` diagrams rendered in the browser), metadata and
-  **version history** on the right. **编辑（生成新版本）** opens an inline editor with a
+  **version history** on the right, plus a **comments** thread (project
+  members/admins can comment). **编辑（生成新版本）** opens an inline editor with a
   live preview; **新建文档** creates one.
 - **Admin** — project statistics and management (see below).
 

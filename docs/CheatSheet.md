@@ -71,6 +71,7 @@ nexplan web                                                      # 打开看板�
 | `nexplan docs update <slug> [--content c] [--status s] [--title t] …` | 更新（版本+1）|
 | `nexplan docs history <slug>` | 版本历史 |
 | `nexplan docs diff <slug> <shaA> <shaB>` | 对比两个版本 |
+| `nexplan docs comment <slug> <body>` | 评论文档（仅成员/管理员）|
 
 ## 看板 / Board
 
@@ -101,8 +102,8 @@ args:    ["/abs/path/nexplan/dist/mcp/server.js"]
 env:     { NEXPLAN_BOARD: "...", NEXPLAN_PROJECT: "<key>", NEXPLAN_AGENT: "<agent>" }
 ```
 
-27 个 `nexplan_*` 工具：`backlog_add/list/get/claim/update/complete/decompose/note/delete`、
-`docs_list/get/create/update/history/diff`、`bug_add/list/get/update`、`status`、`agent_next`、
+28 个 `nexplan_*` 工具：`backlog_add/list/get/claim/update/complete/decompose/note/delete`、
+`docs_list/get/create/update/history/diff/comment`、`bug_add/list/get/update`、`status`、`agent_next`、
 `project_list/create/set_default`、`user_list/add/update`。多数工具接受可选 `project` 与 `author` 参数。
 
 ## 状态枚举 / Enums
