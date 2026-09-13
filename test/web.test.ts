@@ -122,4 +122,48 @@ describe('web dashboard: test cases and runs', () => {
     expect(forced.status).toBe(200);
     expect(forced.body.deletedRuns).toBe(2);
   });
+
+  it('exposes archive status, a forced archive, restore and reindex', async () => {
+    const created = await req('POST', '/api/testcases', { title: 'Archivable', status: 'active' });
+    const id = ((created.body as unknown as Json[])[0] as Json).id as string;
+    // Two old runs plus one fresh run, all unbatched so nothing anchors the batch hot.
+    await req('POST', '/api/testruns', { runs: [
+      { caseId: id, result: 'pass', executedAt: '2024-01-05T00:00:00Z' },
+      { caseId: id, result: 'fail', executedAt: '2024-01-01T00:00:00Z' },
+      { caseId: id, result: 'pass' },
+    ] });
+
+    const before = await req('GET', '/api/testarchive');
+    expect(before.status).toBe(200);
+    expect((before.body.policy as Json).hotDays).toBe(90);
+
+    const dry = await req('POST', '/api/testarchive', { dryRun: true });
+    expect(dry.body.archived).toBe(2);
+    expect(dry.body.dryRun).toBe(true);
+    expect((await req('GET', '/api/testarchive')).body.archivedRuns).toBe(0);
+
+    const moved = await req('POST', '/api/testarchive', {});
+    expect(moved.body.archived).toBe(2);
+    const bundle = ((moved.body.bundles as Json[])[0] as Json).file as string;
+    expect(bundle).toBe('2024-01.jsonl');
+
+    const status = await req('GET', '/api/testarchive');
+    // This file shares one workspace across tests, so compare against the
+    // snapshot taken before archiving rather than assuming an empty board.
+    expect(status.body.hotRuns).toBe((before.body.hotRuns as number) - 2);
+    expect(status.body.archivedRuns).toBe(2);
+    expect((status.body.bundles as Json[])[0]).toMatchObject({ file: bundle, runs: 2 });
+
+    // Merged by default, excludable on request.
+    expect((await req('GET', `/api/testruns?caseId=${id}`)).body as unknown as Json[]).toHaveLength(3);
+    expect((await req('GET', `/api/testruns?caseId=${id}&hotOnly=true`)).body as unknown as Json[]).toHaveLength(1);
+    expect((await req('GET', '/api/testreport?hotOnly=true')).body.totals).toMatchObject({ runs: 1 });
+
+    const restored = await req('POST', '/api/testarchive/restore', { bundle: '2024-01' });
+    expect(restored.body.restored).toBe(2);
+    expect((await req('GET', '/api/testarchive')).body.archivedRuns).toBe(0);
+
+    const reindex = await req('POST', '/api/testarchive/reindex');
+    expect(reindex.status).toBe(200);
+  });
 });

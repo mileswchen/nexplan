@@ -275,6 +275,23 @@ describe('archiving through the store', () => {
     expect(await store.listTestRuns()).toHaveLength(0);
   });
 
+  it('degrades gracefully when the archive directory is deleted by hand', async () => {
+    const store = makeStore(policy());
+    const tc = await store.createTestCase({ title: 'Case', status: 'active' });
+    await seed(store, tc.id, [{ days: 60 }, { days: 1 }]);
+    await store.archiveRuns();
+    expect(await store.listTestRuns()).toHaveLength(2);
+
+    // Archiving is an optimization, never a correctness dependency: losing cold
+    // storage must not break reads, writes or reports.
+    await rm(path.join(dir, 'testruns', 'archive'), { recursive: true, force: true });
+    expect(await store.listTestRuns()).toHaveLength(1); // the hot run is still readable
+    expect((await store.testReport({})).totals.runs).toBe(1);
+    const later = await store.recordTestRun({ caseId: tc.id, result: 'pass' });
+    expect(later.run.id).toBe('TR-3');
+    expect((await store.archiveStatus()).bundles).toHaveLength(0);
+  });
+
   it('reports archived runs by default and can exclude them', async () => {
     const store = makeStore(policy());
     const tc = await store.createTestCase({ title: 'Case', status: 'active' });
