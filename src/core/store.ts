@@ -16,6 +16,7 @@ import {
   ArchivePolicy,
   ArchiveResult,
   ArchiveStatus,
+  ArchiveSummary,
   BoardActivity,
   BoardSummary,
   Bug,
@@ -1275,6 +1276,25 @@ export class Store {
       },
       `test: restore ${file}`,
     );
+  }
+
+  /**
+   * Cheap archive summary derived from `.counters.json` only — no bundle scan.
+   * Attached to query results so callers (agents, scripts) know whether what
+   * they are looking at spans archived cold data.
+   */
+  async archiveSummary(): Promise<ArchiveSummary> {
+    const counters = await this.readCounters();
+    const policy = await this.archivePolicy();
+    const archived = counters.TR_ARCHIVED ?? 0;
+    return {
+      hotRuns: (counters.TR ?? 0) - archived,
+      archivedRuns: archived,
+      oldestHotAt: counters.oldestHotAt ?? null,
+      lastArchiveAt: counters.lastArchiveAt ?? null,
+      hotDays: policy.hotDays,
+      hotMax: policy.hotMax,
+    };
   }
 
   async archiveStatus(policy?: ArchivePolicy): Promise<ArchiveStatus> {

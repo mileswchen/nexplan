@@ -302,6 +302,37 @@ describe('test policy and the completion gate', () => {
     expect(ok.item.status).toBe('done');
   });
 
+  it('drives archiving from the project-level threshold override, end to end', async () => {
+    await ws.createProject({ key: 'tight' });
+    // Workspace default stays generous…
+    await ws.setTestPolicy({ archive: { auto: true, hotDays: 1000, hotMax: 5000, minRunsPerArchive: 50 } });
+    // …while one project archives aggressively through project.json.
+    await ws.setTestPolicy(
+      { archive: { auto: true, hotDays: 1000, hotMax: 2, hysteresisRatio: 0.2, minRunsPerArchive: 1 } },
+      { project: 'tight' },
+    );
+
+    const tight = ws.getStore('tight');
+    const tightCase = await tight.createTestCase({ title: 'Tight case', status: 'active' });
+    for (let i = 0; i < 3; i++) await tight.recordTestRun({ caseId: tightCase.id, result: 'pass' });
+    // 3 hot runs cross hotMax(2) * 1.2, so the third write archives on its own.
+    const tightStatus = await tight.archiveStatus();
+    expect(tightStatus.archivedRuns).toBeGreaterThan(0);
+    expect(tightStatus.bundles.length).toBeGreaterThan(0);
+
+    // The default project keeps everything hot with the workspace-level policy.
+    const def = ws.getStore('default');
+    const defCase = await def.createTestCase({ title: 'Default case', status: 'active' });
+    for (let i = 0; i < 3; i++) await def.recordTestRun({ caseId: defCase.id, result: 'pass' });
+    const defStatus = await def.archiveStatus();
+    expect(defStatus.archivedRuns).toBe(0);
+    expect(defStatus.hotRuns).toBe(3);
+
+    // …and the archived runs are still visible through the merged read path.
+    const merged = await tight.listTestRuns({ caseId: tightCase.id });
+    expect(merged).toHaveLength(3);
+  });
+
   it('refuses to force when the project forbids it', async () => {
     const store = ws.getStore('default');
     const item = await store.createWorkItem({ title: 'Strict' });

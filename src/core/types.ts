@@ -384,6 +384,16 @@ export interface ArchiveStatus {
   indexFresh: boolean;
 }
 
+/** Counters-only view of archiving (cheap enough to attach to every query). */
+export interface ArchiveSummary {
+  hotRuns: number;
+  archivedRuns: number;
+  oldestHotAt: string | null;
+  lastArchiveAt: string | null;
+  hotDays: number;
+  hotMax: number;
+}
+
 /** Per-project test policy (work item completion gate + archive settings). */
 export interface TestPolicy {
   requirePassingOnComplete: boolean;

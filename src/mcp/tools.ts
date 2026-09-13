@@ -744,7 +744,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     'nexplan_test_run_list',
     {
       title: 'List test executions',
-      description: 'List execution records, hot and archived merged by default. Use hotOnly to skip archived runs.',
+      description: 'List execution records, hot and archived merged by default. Use hotOnly to skip archived runs. The result carries an `archive` summary (hot vs archived counts) so you can tell whether cold data exists.',
       inputSchema: z.object({
         caseId: z.string().optional(),
         result: z.union([testResults, z.array(testResults)]).optional(),
@@ -771,7 +771,8 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
         until: args.until ?? args.to,
         includeArchived: args.hotOnly ? false : args.includeArchived,
       };
-      return ok(await store.listTestRuns(filter as never));
+      // `archive` tells the caller whether cold data exists beyond what came back.
+      return ok({ items: await store.listTestRuns(filter as never), archive: await store.archiveSummary() });
     },
   );
 
@@ -781,7 +782,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       title: 'Test report',
       description:
         'Pass rate, not-run cases, failing cases, flaky cases and work-item coverage for a batch, ' +
-        'build, work item or time range.',
+        'build, work item or time range. The result carries an `archive` summary (hot vs archived counts).',
       inputSchema: z.object({
         batch: z.string().optional(),
         build: z.string().optional(),
@@ -794,16 +795,17 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     },
     async (args) => {
       const { store } = await projectStore(workspace, args);
-      return ok(
-        await store.testReport({
+      return ok({
+        ...(await store.testReport({
           batch: args.batch,
           build: args.build,
           workItem: args.workItem,
           since: args.from,
           until: args.to,
           includeArchived: !args.hotOnly,
-        }),
-      );
+        })),
+        archive: await store.archiveSummary(),
+      });
     },
   );
 }
