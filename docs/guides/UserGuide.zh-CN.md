@@ -16,6 +16,7 @@ NexPlan 是一个**基于 git 的项目管理中枢**，面向编码 Agent 与�
 | **backlog / 工作项** | 手动记录任务，或让 Agent 录入分解后的子任务；认领一条 item；标记完成（状态自动更新）。 |
 | **缺陷** | 手动录入 bug，或让 Agent 记录它自动发现的 bug（附证据）。完成关联的工作项时自动关闭该 bug。 |
 | **文档** | 存储设计 / 决策 / ADR 文档，具备**版本管理**。Agent 可创建和更新；每次更新都是一个新的 git 版本。 |
+| **测试** | 维护**可复用的测试用例**（`TC-N`）与**不可变的执行记录**（`TR-N`）。执行失败会自动开缺陷，执行通过会推进该用例守护的缺陷——闭环：工作项 → 测试用例 → 执行 → 缺陷 → 验证。 |
 
 它通过**三种接口**暴露，全部共享同一套存储：
 
@@ -57,10 +58,17 @@ node dist/cli/index.js status
   users/<id>.json       用户注册表
   projects/<key>/
     project.json        项目元信息（名称、描述、成员）
+    .counters.json      id 计数器（删除后的 id 永不复用）
     workitems/          WI-*.json      待办任务
     bugs/               BUG-*.json     缺陷
     docs/               <slug>.md      文档（markdown + frontmatter）
+    testcases/          TC-*.json      测试用例（可复用的测试意图）
+    testruns/           TR-*.json      执行记录（一次执行一个文件）
+    testruns/archive/   <YYYY-MM>.jsonl 归档（冷）执行记录，一行一条 JSON
 ```
+
+执行记录**一次执行一个文件**（`testruns/TR-N.json`）；更早的记录会自动移入
+`testruns/archive/` 下的按月归档包。
 
 每次变更都会执行 `git add` + `git commit`（限定在项目子树内），所以 `git log` 就是
 完整的活动日志，文档也获得真正的版本历史。
@@ -142,6 +150,47 @@ nexplan done WI-3 --note "完成并验证"
 nexplan bug add "登录接口偶发 500" --severity major --evidence "500: internal error"
 nexplan bug update BUG-1 --status in_progress --assignee codex
 ```
+
+### 测试用例与执行记录
+
+**测试用例**（`TC-N`）是一条可复用的测试意图：前置条件、步骤 + 期望结果、类型、优先级、
+它验证的工作项、它守护的缺陷，以及可选的自动化定位。**执行记录**（`TR-N`）是一次执行的
+**不可变**记录：结果、实际结果、证据、环境、构建、批次、耗时、执行人、时间戳。
+
+```bash
+nexplan test list [--status s] [--type t] [--priority p] [--work-item WI-1] [--bug BUG-1] [--tag t] [--automated] [--last-result pass|fail|blocked|skipped|notRun] [--query q] [--limit n] [--json]
+nexplan test add "<标题>" [--type functional] [--priority P1] [--status draft|active|deprecated] [--precondition "..."] [--step "action|expected"]... [--work-item WI-1] [--bug BUG-2]... [--tag a,b] [--automated] [--test-file "test/x.test.ts::name"] [--json-input]
+nexplan test get <TC-1> [--history n]
+nexplan test update <TC-1> [--title] [--description] [--type] [--priority] [--status] [--precondition] [--work-item] [--bug] [--tag] [--automated] [--test-file]
+nexplan test rm <TC-1> [--force]
+nexplan test run <TC-1> --result pass|fail|blocked|skipped [--actual "..."] [--evidence "..."] [--env local] [--build v0.4.0] [--batch "v0.4.0 regression"] [--duration 1200] [--no-bug] [--verify] [--executed-at <iso>]
+nexplan test run --title "<新用例标题>" --result fail      # 自动创建该用例
+nexplan test history [<TC-1>] [--result fail] [--build v] [--batch b] [--from <iso>] [--to <iso>] [--hot-only] [--limit n]
+nexplan test report [--batch b] [--build v] [--work-item WI-1] [--from] [--to] [--hot-only]
+nexplan test archive [--dry-run] [--before <iso>] [--keep n]      # 立即执行归档
+nexplan test archive <YYYY-MM> --restore                          # 把归档包还原回热目录
+nexplan test archive --reindex                                    # 重建 archive/index.json
+nexplan test archive-status                                       # 热/归档条数、策略与归档包列表
+nexplan config set-test-policy <key> <value> [--project key]     # 可用 key：requirePassingOnComplete、allowForce、archive.auto、archive.hotDays、archive.hotMax、archive.hysteresisRatio、archive.minIntervalHours、archive.minRunsPerArchive、archive.budgetMs、archive.bundle
+```
+
+- **失败会自动开缺陷** —— `test run … --result fail` 会自动开一条缺陷（单次调用可用
+  `--no-bug` 关闭）。开单是**去重**的：如果该用例已有 `open` / `reopened` 的缺陷，本次证据会
+  追加到那条缺陷上，而不是再开一条重复缺陷。用例的优先级决定缺陷级别（`P0→critical`、
+  `P1→major`、`P2→minor`、`P3→trivial`）。
+- **通过会推进该用例守护的缺陷** —— `open` / `reopened` → `fixed`；显式加 `--verify` 时还会
+  把 `fixed` → `verified`。对 `fixed` / `verified` 的缺陷记录 **fail** 会把它移回 `reopened`
+  （即捕获到回归）。`wontfix` 的缺陷始终不动，且每一次自动流转都会写进该缺陷的备注。
+- **`nexplan test report`** 按你给定的范围（`--batch`、`--build`、`--work-item`，或整个项目）
+  汇总：通过率、从未执行过的用例、失败的用例、flaky 用例（同一用例在同一范围内既有通过又有
+  失败），以及工作项覆盖率（有多少工作项有对应用例）。
+- **完成门禁默认关闭** —— `nexplan done` 始终会打印验证摘要（通过 / 失败 / 未执行数量），并在
+  关联用例有失败时追加一条备注。用
+  `nexplan config set-test-policy requirePassingOnComplete true` 打开门禁后，如果该工作项关联的
+  active 用例有失败或从未执行，完成操作会被拒绝，并提示加 `--force`；强制完成会被记录到该
+  工作项的备注里。
+- **归档记录默认会被合并读取** —— 查询默认同时读取热数据与归档数据，保证历史完整；
+  `--hot-only` 则只看仍以独立文件留在磁盘上的记录。
 
 ### 文档
 
@@ -251,7 +300,7 @@ env:
 
 > 如果某个 Agent 无法加载 MCP server，它也可以直接 shell 调用 `nexplan` CLI（第 5 节）。
 
-### 28 个工具
+### 36 个工具
 
 多数工具都接受可选的 `project` 参数（默认取 `$NEXPLAN_PROJECT` 或工作区默认项目）。
 
@@ -272,6 +321,12 @@ env:
 | `nexplan_docs_comment` | 评论文档（仅项目成员 / 管理员）|
 | `nexplan_bug_add` | 上报自动发现的缺陷（附证据） |
 | `nexplan_bug_list` / `nexplan_bug_get` / `nexplan_bug_update` | 跟踪缺陷 |
+| `nexplan_test_case_add` | 创建可复用测试用例（可关联工作项） |
+| `nexplan_test_case_list` / `nexplan_test_case_get` | 读取用例（含最近结果与执行历史） |
+| `nexplan_test_case_update` / `nexplan_test_case_delete` | 修改 / 删除测试用例 |
+| `nexplan_test_run_record` | 记录测试执行（一次可上报整套）；失败自动开单，通过推进守护缺陷 |
+| `nexplan_test_run_list` | 读取执行记录（热数据 + 归档） |
+| `nexplan_test_report` | 通过率、未执行、失败与 flaky 用例 |
 | `nexplan_status` | 看板汇总 + 近期活动 |
 | `nexplan_agent_next` | 建议下一个要处理的事项 |
 | `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | 项目管理 |
@@ -304,9 +359,16 @@ LAN 地址（对外暴露前请先改掉默认 `admin` 密码！）。界面**�
 
 - **待办板** —— 按状态分列的看板（`待办 / 待开始 / 进行中 / 评审中 / 完成 / 阻塞`）。点卡片进入
   详情：查看描述、备注，改状态，**开始 / 认领**、**标记完成**、添加备注。用搜索框、优先级和
-  负责人筛选，或点 **+ 新建待办** 手动新增。
+  负责人筛选，或点 **+ 新建待办** 手动新增。若某个工作项有关联测试用例，它的卡片上会带一个
+  **测试徽标**（如 `✅ 2/3` = 3 条用例中 2 条通过；有用例失败时显示 `❌`），在板上就能看到
+  验证状态。
 - **缺陷** —— 可搜索的缺陷列表，带级别 / 状态徽标；**+ 录入缺陷** 上报；行内“标记已修”；
   点击某项可编辑级别 / 状态。
+- **测试** —— 测试用例列表，每条用例显示**最近一次结果**；可按状态、最近结果、优先级筛选或
+  搜索。选中一条用例查看详情：前置条件、**步骤**表（操作 / 期望结果）、关联的工作项与守护的
+  缺陷，以及**执行历史**。**记录执行** 按钮打开对话框录入一次执行（结果、实际结果、证据、
+  环境、构建、批次、耗时），**📊 测试报告** 打开报告对话框（通过率、未执行、失败与 flaky
+  用例）。**+ 新建用例** 用于创建用例。
 - **文档** —— 左侧文档列表；选中后在右侧查看正文（支持 **Markdown 渲染**：标题、列表、表格、
   代码块、图片、链接…以及 **Mermaid** ` ```mermaid ` 架构图，浏览器内实时渲染）、元信息与
   **版本历史**，底部还有**评论**线程（项目成员/管理员可评论）。**编辑（生成新版本）** 打开带实时
@@ -330,7 +392,10 @@ LAN 地址（对外暴露前请先改掉默认 `admin` 密码！）。界面**�
 3. **记录文档** —— 把 *为什么* 记进带版本的文档（`nexplan_docs_create` / `update`）。
 4. **上报缺陷** —— 开发中遇到的问题都走 `nexplan_bug_add`（带 `evidence`），并用
    `fixesBug` 关联修复它的工作项。
-5. **收尾** —— `nexplan_backlog_complete`（置 `done`、记备注、自动关闭关联缺陷）。
+5. **验证** —— 用 `nexplan_test_case_add` **创建一次**测试用例（并关联到工作项），之后**每次**
+   执行都用 `nexplan_test_run_record` 上报——一次调用可以传一个数组，把整套测试的结果一起
+   上报。把真实执行结果记录下来（而不是只写一段备注文字），是看板验证数据可信的前提。
+6. **收尾** —— `nexplan_backlog_complete`（置 `done`、记备注、自动关闭关联缺陷）。
 
 完整流程见 [`docs/WORKFLOW.md`](WORKFLOW.md)。
 

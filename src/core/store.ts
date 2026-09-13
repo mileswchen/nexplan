@@ -2,8 +2,20 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Git, GitCommitInfo } from './git.js';
+import {
+  bundleName,
+  filterBundle,
+  mergeBundle,
+  parseBundle,
+  selectArchivable,
+  summarizeBundle,
+} from './archive.js';
 import { NOW, coerceDocMeta, parseFrontmatter, serializeFrontmatter } from './frontmatter.js';
 import {
+  ArchiveBundleInfo,
+  ArchivePolicy,
+  ArchiveResult,
+  ArchiveStatus,
   BoardActivity,
   BoardSummary,
   Bug,
@@ -25,12 +37,14 @@ import {
   TestCaseStatus,
   TestCaseType,
   TestCaseWithStatus,
+  TestPolicy,
   TestReport,
   TestReportFilter,
   TestResult,
   TestRun,
   TestRunFilter,
   TestStep,
+  DEFAULT_ARCHIVE_POLICY,
   WorkItem,
   WorkItemStatus,
   WorkItemType,
@@ -41,6 +55,8 @@ export interface StoreOptions {
   root: string; // board directory to manage
   agentName?: string; // default attribution for agent-originated writes
   autoCommit?: boolean; // default true; when false the board is plain files
+  /** Effective test policy provider (injected by Workspace; workspace + project). */
+  testPolicy?: () => Promise<TestPolicy>;
 }
 
 interface ProjectMeta {
@@ -131,6 +147,7 @@ export class Store {
   agentName: string;
   private git: Git;
   private autoCommit: boolean;
+  private testPolicyProvider?: () => Promise<TestPolicy>;
   private mutex = new Mutex();
   private dirs = {
     root: '' as string,
@@ -147,6 +164,7 @@ export class Store {
     this.agentName = opts.agentName ?? 'user';
     this.autoCommit = opts.autoCommit ?? true;
     this.git = new Git(this.root);
+    this.testPolicyProvider = opts.testPolicy;
     this.dirs.root = this.root;
     this.dirs.workitems = path.join(this.root, 'workitems');
     this.dirs.bugs = path.join(this.root, 'bugs');
@@ -164,6 +182,7 @@ export class Store {
     await fs.mkdir(this.dirs.docs, { recursive: true });
     await fs.mkdir(this.dirs.testcases, { recursive: true });
     await fs.mkdir(this.dirs.testruns, { recursive: true });
+    await fs.mkdir(this.dirs.testrunsArchive, { recursive: true });
     await this.git.init();
 
     const cfgPath = path.join(this.root, 'nexplan.json');
@@ -831,8 +850,8 @@ export class Store {
   async deleteTestCase(id: string, opts: { force?: boolean } = {}): Promise<{ deleted: TestCase; deletedRuns: number }> {
     const existing = await this.getTestCase(id);
     if (!existing) throw new Error(`test case not found: ${id}`);
-    const runIds = (await this.listTestRuns({ caseId: id })).map((r) => r.id);
-    const archived = (await this.readArchivedRuns()).filter((r) => r.caseId === id).length;
+    const runIds = (await this.listTestRuns({ caseId: id, includeArchived: false })).map((r) => r.id);
+    const archived = (await this.readArchivedRuns(id)).length;
     const totalRuns = runIds.length + archived;
     if (totalRuns > 0 && !opts.force) {
       throw new Error(
@@ -854,10 +873,24 @@ export class Store {
   // --------------------------------------------------------------- test runs
 
   async recordTestRun(input: RecordTestRunInput): Promise<RecordRunResult> {
-    return this.tx(() => this.recordTestRunInner(input), (res) => {
+    const result = await this.tx(() => this.recordTestRunInner(input), (res) => {
       const extra = res.createdBugs.length ? ` +${res.createdBugs.map((b) => b.id).join(',')}` : '';
       return `test: run ${res.run.id} ${res.run.caseId} ${res.run.result} (${res.run.executedBy})${extra}`;
     });
+    await this.runAutoArchive();
+    return result;
+  }
+
+  /**
+   * Post-write archive check. Failures are swallowed on purpose: archiving is an
+   * optimization, never a correctness dependency (design §13.1 I6).
+   */
+  private async runAutoArchive(): Promise<void> {
+    try {
+      await this.archiveIfNeeded();
+    } catch (err) {
+      console.warn(`[nexplan] archive check failed (data untouched): ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -866,7 +899,7 @@ export class Store {
    */
   async recordTestRuns(inputs: RecordTestRunInput[]): Promise<RecordRunResult[]> {
     if (!inputs.length) return [];
-    return this.tx(
+    const results = await this.tx(
       async () => {
         const out: RecordRunResult[] = [];
         for (const input of inputs) out.push(await this.recordTestRunInner(input));
@@ -886,6 +919,8 @@ export class Store {
         return `test: run ${first}..${last} (${results.length}) ${summary}${bugs.length ? ` +${bugs.join(',')}` : ''}`;
       },
     );
+    await this.runAutoArchive();
+    return results;
   }
 
   /** Non-transactional core: one run plus every side effect lands in one commit. */
@@ -1079,7 +1114,7 @@ export class Store {
     }
 
     if (includeArchived) {
-      for (const run of await this.readArchivedRuns()) {
+      for (const run of await this.readArchivedRuns(filter.caseId)) {
         if (matchesRunFilter(run, filter)) out.push(run);
       }
     }
@@ -1113,6 +1148,205 @@ export class Store {
     if (!archived) throw new Error(`test run not found: ${id}`);
     await this.tx(() => this.removeArchivedRuns((r) => r.id === id), `test: delete archived ${id}`);
     return archived;
+  }
+
+  // ----------------------------------------------------------------- archive
+
+  /** Effective archive policy (injected by Workspace; defaults otherwise). */
+  private async archivePolicy(): Promise<ArchivePolicy> {
+    if (!this.testPolicyProvider) return { ...DEFAULT_ARCHIVE_POLICY };
+    const policy = await this.testPolicyProvider();
+    return { ...DEFAULT_ARCHIVE_POLICY, ...(policy?.archive ?? {}) };
+  }
+
+  /** Every hot run (unsorted). */
+  private async readHotRuns(): Promise<TestRun[]> {
+    const out: TestRun[] = [];
+    for (const runId of await this.hotRunIdsDesc()) {
+      const run = await this.getTestRun(runId);
+      if (run) out.push(run);
+    }
+    return out;
+  }
+
+  /**
+   * Opportunistic archive trigger, called after a write has been committed
+   * (design §13.2 T1). The gate is O(1) — it reads `.counters.json`, which the
+   * write path already loads to allocate an id — so the common case adds no IO.
+   */
+  async archiveIfNeeded(): Promise<ArchiveResult | null> {
+    const policy = await this.archivePolicy();
+    if (!policy.auto) return null;
+
+    const counters = await this.readCounters();
+    const hot = (counters.TR ?? 0) - (counters.TR_ARCHIVED ?? 0);
+    const countGate = hot >= policy.hotMax * (1 + policy.hysteresisRatio);
+    const oldest = counters.oldestHotAt ?? null;
+    const olderThanHotWindow = !oldest || oldest < new Date(Date.now() - policy.hotDays * 86400000).toISOString();
+    const throttled =
+      counters.lastEvalAt !== null &&
+      counters.lastEvalAt !== undefined &&
+      Date.now() - Date.parse(counters.lastEvalAt) < policy.minIntervalHours * 3600000;
+    // OR semantics: either gate alone is enough to justify evaluating (§13.3).
+    if (!countGate && !(olderThanHotWindow && !throttled)) return null;
+
+    await this.patchCounters({ lastEvalAt: NOW() }); // record the evaluation unconditionally
+    const policyForSelection = policy;
+    const selected = selectArchivable(await this.readHotRuns(), policyForSelection);
+    if (selected.length < policy.minRunsPerArchive) {
+      return { archived: 0, bundles: [], dryRun: false, skipped: 'below minRunsPerArchive', runs: [] };
+    }
+    return this.performArchive(selected, policyForSelection);
+  }
+
+  /**
+   * Move runs out of the hot directory into monthly bundles. Idempotent: bundles
+   * are merged by run id, so a re-run after a crash is safe.
+   */
+  async archiveRuns(opts: { before?: string; keep?: number; dryRun?: boolean } = {}): Promise<ArchiveResult> {
+    const policy = await this.archivePolicy();
+    const selected = selectArchivable(await this.readHotRuns(), policy, new Date(), opts);
+    if (!selected.length) {
+      return { archived: 0, bundles: [], dryRun: Boolean(opts.dryRun), skipped: 'nothing qualifies', runs: [] };
+    }
+    if (opts.dryRun) {
+      const groups = groupRunsByBundle(selected, policy.bundle);
+      return {
+        archived: selected.length,
+        bundles: [...groups].map(([file, runs]) => ({ file, runs: runs.length })),
+        dryRun: true,
+        runs: selected,
+      };
+    }
+    return this.performArchive(selected, policy);
+  }
+
+  private async performArchive(selected: TestRun[], policy: ArchivePolicy): Promise<ArchiveResult> {
+    return this.tx(
+      async () => {
+        await fs.mkdir(this.dirs.testrunsArchive, { recursive: true });
+        const started = Date.now();
+        const bundles: Array<{ file: string; runs: number }> = [];
+        for (const [file, runs] of groupRunsByBundle(selected, policy.bundle)) {
+          if (bundles.length && Date.now() - started > policy.budgetMs) break; // partial is fine: idempotent
+          const full = path.join(this.dirs.testrunsArchive, file);
+          const existing = await this.readFile(full);
+          await this.writeFileAtomic(full, mergeBundle(existing, runs));
+          for (const run of runs) {
+            await fs.rm(this.testRunPath(run.id), { force: true });
+          }
+          bundles.push({ file, runs: runs.length });
+        }
+        const moved = bundles.reduce((n, b) => n + b.runs, 0);
+        const remaining = await this.readHotRuns();
+        const counters = await this.readCounters();
+        await this.patchCounters({
+          TR_ARCHIVED: (counters.TR_ARCHIVED ?? 0) + moved,
+          oldestHotAt: remaining.length ? remaining.map((r) => r.executedAt).sort()[0] : null,
+          lastArchiveAt: NOW(),
+        });
+        await this.reindexArchiveInner();
+        return { archived: moved, bundles, dryRun: false, runs: selected.slice(0, moved) };
+      },
+      (res) =>
+        `test: archive ${res.bundles.map((b) => b.file.replace(/\.jsonl$/, '')).join(', ')} (${res.archived} runs)`,
+    );
+  }
+
+  /** Move a bundle's runs back into the hot directory (rollback / correction). */
+  async restoreArchive(bundle: string): Promise<{ restored: number; file: string }> {
+    const file = bundle.endsWith('.jsonl') ? bundle : `${bundle}.jsonl`;
+    const full = path.join(this.dirs.testrunsArchive, file);
+    const raw = await this.readFile(full);
+    if (raw === null) throw new Error(`archive bundle not found: ${file}`);
+    return this.tx(
+      async () => {
+        const { runs } = parseBundle(raw);
+        for (const run of runs) await this.writeJson(this.testRunPath(run.id), run);
+        await fs.rm(full, { force: true });
+        const remaining = await this.readHotRuns();
+        const counters = await this.readCounters();
+        await this.patchCounters({
+          TR_ARCHIVED: Math.max(0, (counters.TR_ARCHIVED ?? 0) - runs.length),
+          oldestHotAt: remaining.length ? remaining.map((r) => r.executedAt).sort()[0] : null,
+        });
+        await this.reindexArchiveInner();
+        return { restored: runs.length, file };
+      },
+      `test: restore ${file}`,
+    );
+  }
+
+  async archiveStatus(policy?: ArchivePolicy): Promise<ArchiveStatus> {
+    const effective = policy ?? (await this.archivePolicy());
+    const counters = await this.readCounters();
+    const hotIds = await this.hotRunIdsDesc();
+    const bundles: ArchiveBundleInfo[] = [];
+    let archivedRuns = 0;
+    for (const file of await this.archiveBundleFiles()) {
+      const raw = (await this.readFile(path.join(this.dirs.testrunsArchive, file))) ?? '';
+      const summary = summarizeBundle(raw);
+      archivedRuns += summary.runs;
+      bundles.push({
+        file,
+        runs: summary.runs,
+        bytes: Buffer.byteLength(raw, 'utf8'),
+        from: summary.from,
+        to: summary.to,
+        cases: summary.cases,
+      });
+    }
+    return {
+      hotRuns: counters.TR !== undefined ? (counters.TR ?? 0) - (counters.TR_ARCHIVED ?? 0) : hotIds.length,
+      archivedRuns: counters.TR_ARCHIVED ?? archivedRuns,
+      oldestHotAt: counters.oldestHotAt ?? null,
+      lastEvalAt: counters.lastEvalAt ?? null,
+      lastArchiveAt: counters.lastArchiveAt ?? null,
+      policy: effective,
+      bundles,
+      indexFresh: Boolean((await this.readArchiveIndex()).builtAt),
+    };
+  }
+
+  /** Rebuild the optional plain-text archive index (`archive/index.json`). */
+  async reindexArchive(): Promise<Record<string, unknown>> {
+    await this.tx(() => this.reindexArchiveInner(), 'test: reindex archive');
+    return this.readArchiveIndex();
+  }
+
+  private async reindexArchiveInner(): Promise<void> {
+    const bundles: ArchiveBundleInfo[] = [];
+    const byCase: Record<string, string[]> = {};
+    for (const file of (await this.archiveBundleFiles()).slice().reverse()) {
+      const raw = (await this.readFile(path.join(this.dirs.testrunsArchive, file))) ?? '';
+      const summary = summarizeBundle(raw);
+      const month = file.replace(/\.jsonl$/, '');
+      bundles.push({
+        file,
+        runs: summary.runs,
+        bytes: Buffer.byteLength(raw, 'utf8'),
+        from: summary.from,
+        to: summary.to,
+        cases: summary.cases,
+      });
+      for (const run of parseBundle(raw).runs) {
+        const months = byCase[run.caseId] ?? [];
+        if (!months.includes(month)) months.push(month);
+        byCase[run.caseId] = months;
+      }
+    }
+    await this.writeJson(path.join(this.dirs.testrunsArchive, 'index.json'), { builtAt: NOW(), bundles, byCase });
+  }
+
+  private async readArchiveIndex(): Promise<Record<string, unknown>> {
+    return (await this.readJson<Record<string, unknown>>(path.join(this.dirs.testrunsArchive, 'index.json'))) ?? {};
+  }
+
+  /** Atomic write (tmp + rename) so readers never see a half-written bundle. */
+  private async writeFileAtomic(target: string, content: string): Promise<void> {
+    const tmp = `${target}.tmp`;
+    await fs.writeFile(tmp, content, 'utf8');
+    await fs.rename(tmp, target);
   }
 
   /** Aggregate pass/fail/coverage insight for a batch, build or work item. */
@@ -1248,22 +1482,30 @@ export class Store {
     return files.sort().reverse();
   }
 
-  /** Read every archived run (cold data). Empty until archiving has run. */
-  private async readArchivedRuns(): Promise<TestRun[]> {
+  /**
+   * Read archived runs (cold data). Empty until archiving has run. When a caseId
+   * is given, the optional plain-text index narrows the bundles to open.
+   */
+  private async readArchivedRuns(caseId?: string): Promise<TestRun[]> {
     const out: TestRun[] = [];
-    for (const file of await this.archiveBundleFiles()) {
+    const files = caseId ? await this.bundlesForCase(caseId) : await this.archiveBundleFiles();
+    for (const file of files) {
       const raw = await this.readFile(path.join(this.dirs.testrunsArchive, file));
       if (raw === null) continue;
-      for (const line of raw.split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          out.push(JSON.parse(line) as TestRun);
-        } catch {
-          // A corrupt line must never break queries; skip it.
-        }
+      for (const run of parseBundle(raw).runs) {
+        if (!caseId || run.caseId === caseId) out.push(run);
       }
     }
     return out;
+  }
+
+  /** Bundles that may contain a case, per `archive/index.json` (falls back to all). */
+  private async bundlesForCase(caseId: string): Promise<string[]> {
+    const index = await this.readArchiveIndex();
+    const byCase = (index.byCase ?? {}) as Record<string, string[]>;
+    const months = byCase[caseId];
+    if (!Array.isArray(months) || !months.length) return this.archiveBundleFiles();
+    return months.map((m) => `${m}.jsonl`).filter((f) => f.endsWith('.jsonl'));
   }
 
   /** Remove archived runs matching a predicate; returns how many were removed. */
@@ -1273,22 +1515,12 @@ export class Store {
       const full = path.join(this.dirs.testrunsArchive, file);
       const raw = await this.readFile(full);
       if (raw === null) continue;
-      const kept: string[] = [];
-      for (const line of raw.split('\n')) {
-        if (!line.trim()) continue;
-        let run: TestRun | null = null;
-        try {
-          run = JSON.parse(line) as TestRun;
-        } catch {
-          kept.push(line); // keep unparsable content rather than lose data
-          continue;
-        }
-        if (predicate(run)) removed++;
-        else kept.push(line);
-      }
-      if (!kept.length) await fs.rm(full, { force: true });
-      else await fs.writeFile(full, kept.join('\n') + '\n', 'utf8');
+      const result = filterBundle(raw, predicate);
+      removed += result.removed;
+      if (!result.raw) await fs.rm(full, { force: true });
+      else await this.writeFileAtomic(full, result.raw);
     }
+    if (removed) await this.reindexArchiveInner();
     return removed;
   }
 
@@ -1600,6 +1832,18 @@ export interface RecordTestRunInput {
   verifyBugs?: boolean;
   /** Auto-create the case when `caseTitle` matches nothing. Default true. */
   autoCreateCase?: boolean;
+}
+
+/** Group runs by their bundle file name, preserving oldest-first order. */
+function groupRunsByBundle(runs: TestRun[], bundle: ArchivePolicy['bundle']): Map<string, TestRun[]> {
+  const groups = new Map<string, TestRun[]>();
+  for (const run of runs) {
+    const name = bundleName(run.executedAt, bundle);
+    const list = groups.get(name) ?? [];
+    list.push(run);
+    groups.set(name, list);
+  }
+  return new Map([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)));
 }
 
 /** Newest execution first: by `executedAt`, then by id (ids are monotonic). */

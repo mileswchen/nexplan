@@ -129,6 +129,7 @@ nexplan test rm <TC-1> [--force] [--project key]
 nexplan test run <TC-1> --result pass|fail|blocked|skipped [--actual "..." ] [--evidence "..."] [--env ci] [--build v0.4.0] [--batch "regression"] [--no-bug] [--verify] [--project key]
 nexplan test history [<TC-1>] [--result fail] [--build v] [--batch b] [--from d] [--to d] [--hot-only] [--project key]
 nexplan test report [--batch b] [--build v] [--work-item WI-1] [--hot-only] [--project key]
+nexplan test archive [--dry-run] [--before <iso>] [--keep n] | test archive <YYYY-MM> --restore | test archive --reindex | test archive-status   [--project key]
 nexplan config set-test-policy <key> <value> [--project key]   # e.g. requirePassingOnComplete true, archive.hotMax 5000
 nexplan docs list | docs show <slug> | docs new <title> | docs update <slug> | docs history <slug> | docs diff <slug> <shaA> <shaB> | docs comment <slug> <body>   [--project key]
 nexplan status [--project key]

@@ -123,6 +123,9 @@ env:     { NEXPLAN_BOARD: "...", NEXPLAN_PROJECT: "<key>", NEXPLAN_AGENT: "<agen
 | `nexplan test report [--batch b] [--build v] [--work-item WI-1]` | 通过率 / 未执行 / 失败 / flaky |
 | `nexplan config set-test-policy requirePassingOnComplete true` | 开启「用例全通过才能完成工作项」门禁 |
 | `nexplan config set-test-policy archive.hotMax 5000` | 归档阈值（热数据条数上限） |
+| `nexplan test archive [--dry-run] [--before d] [--keep n]` | 立即归档（写入后也会自动触发） |
+| `nexplan test archive <YYYY-MM> --restore` | 把归档包还原回热目录 |
+| `nexplan test archive-status` | 热/归档条数、策略与归档包列表 |
 
 > `test run` 默认在**失败时自动建缺陷**（`--no-bug` 关闭）；`pass` 会把守护的缺陷
 > `open/reopened → fixed`，加 `--verify` 时再把 `fixed → verified`；`fail` 会把

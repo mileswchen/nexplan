@@ -309,6 +309,9 @@ export class Workspace {
         root: this.projectDir(key),
         agentName: this.agentName,
         autoCommit: this.autoCommit,
+        // Injected so the store can gate archiving without knowing about
+        // workspace.json or per-project overrides.
+        testPolicy: () => this.getTestPolicy(key),
       });
       this.stores.set(key, store);
     }

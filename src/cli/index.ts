@@ -668,6 +668,67 @@ testCmd
     out(formatTestReport(report) + '\n');
   });
 
+testCmd
+  .command('archive [bundle]')
+  .description(
+    'Move old execution records into monthly bundles (cold storage). Runs automatically after a ' +
+      'write once a threshold is crossed; this command forces it now.',
+  )
+  .option('--dry-run', 'Only report what would be archived.')
+  .option('--before <iso>', 'Archive runs executed before this timestamp (overrides hotDays).')
+  .option('--keep <n>', 'Keep the newest N runs hot (overrides hotMax).')
+  .option('--restore', 'Restore a bundle (pass the bundle name, e.g. 2025-09) into the hot directory.')
+  .option('--reindex', 'Rebuild archive/index.json.')
+  .action(async (bundle: string | undefined, opts: Record<string, string | boolean>) => {
+    const s = await store(true);
+    if (opts.reindex) {
+      const index = await s.reindexArchive();
+      if (program.opts().json) return printJson(index);
+      return out(`archive index rebuilt (${((index.bundles as unknown[]) ?? []).length} bundle(s))\n`);
+    }
+    if (opts.restore) {
+      if (!bundle) throw new Error('pass the bundle name to restore, e.g. nexplan test archive 2025-09 --restore');
+      const res = await s.restoreArchive(bundle);
+      if (program.opts().json) return printJson(res);
+      return out(`restored ${res.restored} run(s) from ${res.file}\n`);
+    }
+    const res = await s.archiveRuns({
+      before: opts.before as string,
+      keep: opts.keep ? Number(opts.keep) : undefined,
+      dryRun: Boolean(opts.dryRun),
+    });
+    if (program.opts().json) return printJson(res);
+    if (!res.archived) return out(`nothing to archive${res.skipped ? ` (${res.skipped})` : ''}\n`);
+    out(
+      `${opts.dryRun ? 'would archive' : 'archived'} ${res.archived} run(s) into ` +
+        `${res.bundles.map((b) => `${b.file} (${b.runs})`).join(', ')}\n`,
+    );
+  });
+
+testCmd
+  .command('archive-status')
+  .description('Show hot/archived run counts, retention policy and bundles.')
+  .action(async () => {
+    const status = await (await store()).archiveStatus();
+    if (program.opts().json) return printJson(status);
+    out(`hot runs:      ${status.hotRuns}\n`);
+    out(`archived runs: ${status.archivedRuns}\n`);
+    out(`oldest hot:    ${status.oldestHotAt ?? '-'}\n`);
+    out(`last eval:     ${status.lastEvalAt ?? '-'}\n`);
+    out(`last archive:  ${status.lastArchiveAt ?? '-'}\n`);
+    out(
+      `policy:        auto=${status.policy.auto} hotDays=${status.policy.hotDays} hotMax=${status.policy.hotMax} ` +
+        `hysteresis=${status.policy.hysteresisRatio} bundle=${status.policy.bundle}\n`,
+    );
+    if (!status.bundles.length) return out('bundles:       (none)\n');
+    out('bundles:\n');
+    for (const b of status.bundles) {
+      out(
+        `  ${b.file}  ${b.runs} run(s)  ${b.cases} case(s)  ${(b.bytes / 1024).toFixed(1)}KB  ${b.from ?? '-'} → ${b.to ?? '-'}\n`,
+      );
+    }
+  });
+
 // ---- board -------------------------------------------------------------------
 
 program

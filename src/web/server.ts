@@ -673,6 +673,50 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<http.
     }
   });
 
+  // ----------------------------------------------------------------- archive
+
+  app.get('/api/testarchive', async (req, res, next) => {
+    try {
+      res.json(await (await storeFor(req)).archiveStatus());
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/testarchive', async (req, res, next) => {
+    try {
+      const store = await storeFor(req, true);
+      const { dryRun, before, keep } = req.body ?? {};
+      res.json(
+        await store.archiveRuns({
+          dryRun: Boolean(dryRun),
+          before: before ? String(before) : undefined,
+          keep: keep === undefined || keep === null || keep === '' ? undefined : Number(keep),
+        }),
+      );
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/testarchive/restore', async (req, res, next) => {
+    try {
+      const bundle = String(req.body?.bundle ?? '').trim();
+      if (!bundle) return res.status(400).json({ error: 'bundle required' });
+      res.json(await (await storeFor(req, true)).restoreArchive(bundle));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/testarchive/reindex', async (req, res, next) => {
+    try {
+      res.json(await (await storeFor(req, true)).reindexArchive());
+    } catch (e) {
+      next(e);
+    }
+  });
+
   // fallthrough (SPA routing)
   app.get('*', (_req, res) => {
     res.sendFile(path.join(publicDir, 'index.html'));
