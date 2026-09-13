@@ -661,6 +661,10 @@ A1 Web 归档 UI（Admin 归档面板：热/归档条数、最近检查与归档
   **延期的原因**：先确认目标项目的 runner/CI 分布，避免为一个非通用格式先付适配器与维护成本。
   **判定标准（下周评审用）**：① 目标项目里有多少 runner 无法一行产出准绳 JSON？② CI 里是否已经产出了可复用的机器可读报告？③ 手工/Agent 上报（`test_run_record`）的遵守率是否真的会掉到需要导入来兜底？
 
+**E. 非功能（已交付）**
+
+- `.github/workflows/ci.yml`：每次 push 到 `main` 与每个 PR 在 Node 20/24 上跑 `typecheck → test → build`；**先固定 git 身份**（board 本身是 git 仓库、测试断言其提交历史，而 store 对提交失败只打警告，缺身份会让这些断言静默失效）。已用「全新 HOME + 无全局 git 配置」模拟 runner 验证通过。
+
 **P2 建议追加（本文档原未列，待拍板）**
 
 - MCP 的归档**只读可见性**：`nexplan_test_run_list` / `nexplan_test_report` 返回里附一个 `archive` 摘要（热集条数、已归档条数、最近归档时间）—— 不新增工具、不破坏 36 的工具数，但让 Agent 知道「查到的数据是否被归档过」。

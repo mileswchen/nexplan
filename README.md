@@ -1,5 +1,7 @@
 # NexPlan
 
+[![CI](https://github.com/mileswchen/nexplan/actions/workflows/ci.yml/badge.svg)](https://github.com/mileswchen/nexplan/actions/workflows/ci.yml)
+
 **NexPlan** is a git-backed project management hub for coding agents. It is a single
 tool that **dsh, Claude Code, Codex, OpenCode** and other MCP-capable agents can all
 load, so every agent in your workflow talks to the same backlog, bug tracker, and
@@ -98,10 +100,17 @@ counter in frontmatter; document history and diffs come straight from git.
 
 ```bash
 npm run build        # tsc → dist/
-npm test             # vitest: core store + MCP end-to-end
+npm test             # vitest: 103 tests across core store, MCP, CLI, web (HTTP), i18n
+npm run typecheck    # tsc --noEmit
 npm run dev:mcp      # run the MCP server from source
 npm run dev:web      # run the web server from source
 ```
+
+`.github/workflows/ci.yml` runs `typecheck` → `test` → `build` on Node 20 and 24 for
+every push to `main` and every pull request. It pins a git identity first: the board
+is itself a git repository and the tests assert its commit history, while the store
+treats a failed commit as a warning — without an identity those assertions would
+silently stop testing anything.
 
 ## CLI reference
 
