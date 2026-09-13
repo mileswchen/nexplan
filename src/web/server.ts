@@ -577,7 +577,14 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<http.
       const store = await storeFor(req);
       const testCase = await store.getTestCase(req.params.id);
       if (!testCase) return res.status(404).json({ error: 'test case not found' });
-      const runs = await store.testCaseHistory(req.params.id, req.query.limit ? Number(req.query.limit) : 50);
+      const runs = await store.listTestRuns({
+        caseId: req.params.id,
+        limit: req.query.limit ? Number(req.query.limit) : 50,
+        // Archived (cold) runs are merged unless the caller opts out.
+        includeArchived: req.query.hotOnly === 'true' ? false : undefined,
+        since: req.query.from ? String(req.query.from) : undefined,
+        until: req.query.to ? String(req.query.to) : undefined,
+      });
       res.json({ testCase, runs });
     } catch (e) {
       next(e);

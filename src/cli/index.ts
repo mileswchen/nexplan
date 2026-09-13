@@ -592,10 +592,50 @@ testCmd
   .option('--no-bug', 'Do not file a bug when the result is a failure.')
   .option('--verify', 'Advance a fixed linked bug to verified on a pass.')
   .option('--executed-at <iso>', 'Backdate the execution time.')
+  .option(
+    '--json-input',
+    'Read one or more runs from stdin as a JSON array (fields match the MCP test_run_record payload); ' +
+      'the whole batch is committed once.',
+  )
   .action(async (id: string | undefined, opts: Record<string, string | boolean>) => {
+    if (opts.jsonInput) {
+      const parsed = JSON.parse(await readStdin()) as unknown;
+      const items = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray((parsed as { runs?: unknown[] })?.runs)
+          ? (parsed as { runs: unknown[] }).runs
+          : [parsed];
+      const results = await (await store(true)).recordTestRuns(
+        items.map((raw) => {
+          const run = raw as Record<string, unknown>;
+          return {
+            ...run,
+            batch: (run.batch as string) ?? (opts.batch as string) ?? run.batch,
+            environment: run.environment ?? (opts.env as string),
+            build: run.build ?? (opts.build as string),
+            createBugOnFailure: run.createBugOnFailure ?? opts.bug !== false,
+            verifyBugs: run.verifyBugs === true || Boolean(opts.verify),
+          } as never;
+        }),
+      );
+      if (program.opts().json) return printJson(results);
+      const counts = results.reduce<Record<string, number>>((acc, r) => {
+        acc[r.run.result] = (acc[r.run.result] ?? 0) + 1;
+        return acc;
+      }, {});
+      out(
+        `recorded ${results.length} run(s): ` +
+          Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ') +
+          '\n',
+      );
+      for (const r of results) out(formatTestRun(r.run) + '\n');
+      for (const b of results.flatMap((r) => r.createdBugs)) out('  filed ' + formatBug(b) + '\n');
+      for (const b of results.flatMap((r) => r.updatedBugs)) out('  updated ' + formatBug(b) + '\n');
+      return;
+    }
     const result = String(opts.result ?? '');
     if (!['pass', 'fail', 'blocked', 'skipped'].includes(result)) {
-      throw new Error('--result must be one of pass|fail|blocked|skipped');
+      throw new Error('--result must be one of pass|fail|blocked|skipped (or use --json-input)');
     }
     if (!id && !opts.title) throw new Error('provide a case id or --title');
     const res = await (await store(true)).recordTestRun({

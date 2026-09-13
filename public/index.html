@@ -252,6 +252,10 @@
       </div>
       <div class="board" id="project-stats" style="margin-top:12px"></div>
     </div>
+    <div class="panel" style="margin-bottom:16px">
+      <h2 data-i18n="archive_title">Test run archive</h2>
+      <div id="archive-panel" style="margin-top:8px"></div>
+    </div>
     <div class="grid2">
       <div class="panel">
         <h2 data-i18n="projects">Projects</h2>
@@ -343,6 +347,13 @@ const I18N = {
     form_test_file: 'Automation locator (optional)', delete_case: 'Delete case',
     confirm_del_case: 'Delete test case {x}?', force_del_case: 'It has execution records — delete them too?',
     case_saved: 'Saved', verifies_cases: 'cases', verified: 'verified',
+    w_tests: 'Test cases', w_no_tests: 'No test cases linked', form_guards: 'Guarded bugs (BUG-N, comma-separated)',
+    case_include_archived: 'Include archived runs', report_from: 'From', report_to: 'To',
+    stat_notrun: 'Not run', archive_title: 'Test run archive', archive_unavailable: 'Archive status unavailable',
+    archive_hot: 'Hot runs', archive_cold: 'Archived', archive_last: 'Last archive', archive_eval: 'Last check',
+    archive_policy: 'Policy', archive_now: 'Archive now', archive_dry: 'Dry run', archive_reindex: 'Reindex',
+    archive_restore: 'Restore', archive_no_bundles: 'No bundles yet', archive_nothing: 'Nothing to archive',
+    archive_reindexed: 'Index rebuilt',
   },
   zh: {
     title: 'NexPlan 项目管理',
@@ -408,6 +419,13 @@ const I18N = {
     form_test_file: '自动化定位（可选）', delete_case: '删除用例',
     confirm_del_case: '删除测试用例 {x} ？', force_del_case: '它已有执行记录 —— 是否连同执行记录一起删除？',
     case_saved: '已保存', verifies_cases: '个用例', verified: '已验证',
+    w_tests: '测试用例', w_no_tests: '未关联测试用例', form_guards: '守护缺陷（BUG-N，逗号分隔）',
+    case_include_archived: '包含归档执行记录', report_from: '起始日期', report_to: '结束日期',
+    stat_notrun: '未执行', archive_title: '执行记录归档', archive_unavailable: '无法获取归档状态',
+    archive_hot: '热数据', archive_cold: '已归档', archive_last: '最近归档', archive_eval: '最近检查',
+    archive_policy: '策略', archive_now: '立即归档', archive_dry: '试运行', archive_reindex: '重建索引',
+    archive_restore: '还原', archive_no_bundles: '暂无归档包', archive_nothing: '没有可归档的记录',
+    archive_reindexed: '索引已重建',
   }
 };
 
@@ -535,6 +553,10 @@ function bindCards() {
 
 async function openItem(id) {
   const i = await api.get('/api/workitems/' + id + '?project=' + encodeURIComponent(project));
+  // Linked test cases: what verifies this item, and how it last went.
+  const linkedCases = await api
+    .get(`/api/testcases?workItem=${encodeURIComponent(id)}&project=${encodeURIComponent(project)}`)
+    .catch(() => []);
   const modal = $('#modal');
   const canDelete = !!(currentUser && (currentUser.role === 'admin' || currentUser.id === i.createdBy));
   modal.innerHTML = `
@@ -557,6 +579,17 @@ async function openItem(id) {
       <button class="btn sm" id="w-claim">${t('w_claim')}</button>
       <button class="btn sm primary" id="w-complete">${t('w_complete')}</button>
     </div>
+    <label>${t('w_tests')}</label>
+    <div id="w-tests">${linkedCases.length
+      ? linkedCases.map(c => `<div class="list-item" data-case="${esc(c.id)}" style="cursor:pointer">
+          <div class="row">
+            <span class="id" style="font-family:monospace;color:var(--accent)">${esc(c.id)}</span>
+            ${resultBadge(c.lastResult)}
+            <b>${esc(c.title)}</b>
+            ${c.lastRunAt ? `<span class="muted" style="font-size:12px">${esc(dt(c.lastRunAt))}${c.lastBuild ? ' · ' + esc(c.lastBuild) : ''}</span>` : ''}
+          </div>
+        </div>`).join('')
+      : `<div class="empty">${t('w_no_tests')}</div>`}</div>
     <label>${t('w_notes')}</label>
     <div id="w-notes">${(i.notes||[]).map(n => `<div class="note">${esc(n.body)} <span class="who">— ${esc(n.author)} ${esc(new Date(n.at).toLocaleString())}</span></div>`).join('') || `<div class="empty">${t('w_no_notes')}</div>`}</div>
     <div class="row" style="margin-top:10px">
@@ -601,6 +634,15 @@ async function openItem(id) {
     await refresh();
   };
   $('#w-close').onclick = closeModal;
+  // Jump straight from a work item to the case that verifies it.
+  document.querySelectorAll('#w-tests [data-case]').forEach(el => {
+    el.onclick = async () => {
+      const caseId = el.dataset.case;
+      closeModal();
+      await showTab('tests');
+      await openCase(caseId);
+    };
+  });
 }
 
 function closeModal() { $('#modal-bg').classList.remove('open'); }
@@ -1059,15 +1101,83 @@ async function loadAdmin() {
     const backlog = (s.totalWorkItems||0) - done - inprog;
     const openBugs = s.bugs?.open || 0;
     const memberCount = (p.members||[]).length;
+    const tests = s.tests || {};
+    const totalCases = s.totalTestCases || 0;
+    const passRate = (tests.pass || 0) + (tests.fail || 0) > 0
+      ? Math.round((tests.pass / ((tests.pass || 0) + (tests.fail || 0))) * 1000) / 10
+      : null;
     return `<div class="col" data-key="${esc(p.key)}" style="cursor:pointer">
       <h3>${esc(p.key)} <span class="count">${esc(p.name)}</span></h3>
       <div class="card"><div class="title">${t('stat_todo')} <b>${backlog}</b> · ${t('stat_inprog')} <b>${inprog}</b> · ${t('stat_done')} <b>${done}</b></div>
-        <div class="meta"><span class="badge sev-critical">${t('stat_bugs')} ${openBugs}</span><span class="muted">${t('stat_docs')} ${s.docs||0}</span><span class="muted">${t('stat_members')} ${memberCount}</span></div></div>
+        <div class="meta"><span class="badge sev-critical">${t('stat_bugs')} ${openBugs}</span><span class="muted">${t('stat_docs')} ${s.docs||0}</span><span class="muted">${t('stat_members')} ${memberCount}</span></div>
+        <div class="meta">
+          <span class="muted">${t('chips_tests')} ${totalCases}</span>
+          <span class="muted">${t('chips_pass')} ${tests.pass||0}</span>
+          <span class="muted">${t('chips_fail')} ${tests.fail||0}</span>
+          <span class="muted">${t('stat_notrun')} ${tests.notRun||0}</span>
+          <span class="muted">${t('report_pass_rate')} ${passRate === null ? '-' : passRate + '%'}</span>
+          <span class="muted">${t('report_runs')} ${s.totalTestRuns||0}</span>
+        </div></div>
     </div>`;
   }).join('') || `<div class="empty">${t('stat_empty')}</div>`;
   document.querySelectorAll('#project-stats .col').forEach(c => c.onclick = () => {
     project = c.dataset.key; $('#project-select').value = project; showTab('board');
   });
+
+  // Archive status for the current project: hot/cold counts, bundles, and the
+  // manual triggers (the automatic trigger rides on writes).
+  const archive = await api.get('/api/testarchive?project=' + encodeURIComponent(project)).catch(() => null);
+  const panel = $('#archive-panel');
+  if (!archive) {
+    panel.innerHTML = `<div class="empty">${t('archive_unavailable')}</div>`;
+  } else {
+    const pol = archive.policy || {};
+    panel.innerHTML = `
+      <div class="row">
+        <span class="chip">${t('archive_hot')} <b>${archive.hotRuns}</b></span>
+        <span class="chip">${t('archive_cold')} <b>${archive.archivedRuns}</b></span>
+        <span class="chip">${t('archive_last')} <b>${archive.lastArchiveAt ? esc(dt(archive.lastArchiveAt)) : '-'}</b></span>
+        <span class="chip">${t('archive_eval')} <b>${archive.lastEvalAt ? esc(dt(archive.lastEvalAt)) : '-'}</b></span>
+      </div>
+      <div class="muted" style="margin-top:6px;font-size:12px">
+        ${t('archive_policy')}: auto=${pol.auto} · hotDays=${pol.hotDays} · hotMax=${pol.hotMax} · bundle=${esc(pol.bundle || 'month')}
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn sm" id="arch-now">${t('archive_now')}</button>
+        <button class="btn sm" id="arch-dry">${t('archive_dry')}</button>
+        <button class="btn sm" id="arch-reindex">${t('archive_reindex')}</button>
+      </div>
+      <div id="arch-bundles" style="margin-top:10px">${(archive.bundles||[]).length
+        ? archive.bundles.map(b => `<div class="list-item">
+            <div class="row"><b>${esc(b.file)}</b><span class="muted">${b.runs} ${t('report_runs')}</span>
+              <span class="muted">${b.cases} ${t('verifies_cases')}</span>
+              <span class="muted">${(b.bytes/1024).toFixed(1)}KB</span>
+              <span class="muted">${esc(b.from||'-')} → ${esc(b.to||'-')}</span>
+              <button class="btn sm" data-arch-restore="${esc(b.file.replace(/\.jsonl$/,''))}">${t('archive_restore')}</button></div>
+          </div>`).join('')
+        : `<div class="empty">${t('archive_no_bundles')}</div>`}</div>`;
+    $('#arch-now').onclick = async () => {
+      const r = await api.send('/api/testarchive?project=' + encodeURIComponent(project), 'POST', {});
+      notify(r.archived ? `${t('archive_now')}: ${r.archived}` : t('archive_nothing'));
+      await loadAdmin();
+    };
+    $('#arch-dry').onclick = async () => {
+      const r = await api.send('/api/testarchive?project=' + encodeURIComponent(project), 'POST', { dryRun: true });
+      notify(r.archived
+        ? `${t('archive_dry')}: ${r.archived} → ${(r.bundles||[]).map(b => `${b.file}(${b.runs})`).join(', ')}`
+        : t('archive_nothing'));
+    };
+    $('#arch-reindex').onclick = async () => {
+      await api.send('/api/testarchive/reindex?project=' + encodeURIComponent(project), 'POST', {});
+      notify(t('archive_reindexed'));
+      await loadAdmin();
+    };
+    document.querySelectorAll('[data-arch-restore]').forEach(b => b.onclick = async () => {
+      const r = await api.send('/api/testarchive/restore?project=' + encodeURIComponent(project), 'POST', { bundle: b.dataset.archRestore });
+      notify(`${t('archive_restore')}: ${r.restored}`);
+      await loadAdmin();
+    });
+  }
 
   // Permission toggle button.
   const pt = $('#perm-toggle');
@@ -1111,6 +1221,8 @@ async function loadAdmin() {
 // ---------------- tests ----------------
 let caseStatsByItem = {};
 let openCaseId = null;
+/** Case history scope: false = merge archived runs (default), true = hot only. */
+let caseHotOnly = false;
 
 const dt = (iso) => (iso ? new Date(iso).toLocaleString() : '-');
 const resultBadge = (r) => {
@@ -1187,7 +1299,9 @@ function runRowHtml(r) {
 
 async function openCase(id, scroll = true) {
   openCaseId = id;
-  const data = await api.get(`/api/testcases/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}&limit=50`);
+  const data = await api.get(
+    `/api/testcases/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}&limit=50${caseHotOnly ? '&hotOnly=true' : ''}`,
+  );
   const c = data.testCase;
   const runs = data.runs || [];
   $('#case-view').innerHTML = `
@@ -1212,10 +1326,17 @@ async function openCase(id, scroll = true) {
       <button class="btn sm" id="case-del">${t('delete_case')}</button>
     </div>
     <h3 style="margin-top:16px">${t('case_history')}</h3>
+    <label style="display:flex;align-items:center;gap:6px;margin:0 0 6px">
+      <input type="checkbox" id="case-arch" ${caseHotOnly ? '' : 'checked'} style="width:auto" /> ${t('case_include_archived')}
+    </label>
     ${runs.length ? runs.map(runRowHtml).join('') : `<div class="empty">${t('case_no_history')}</div>`}`;
   $('#case-run').onclick = () => recordRunForm(c);
   $('#case-edit').onclick = () => caseForm(c);
   $('#case-del').onclick = () => deleteCase(c);
+  $('#case-arch').onchange = async (e) => {
+    caseHotOnly = !e.target.checked;
+    await openCase(id, false);
+  };
   if (scroll) $('#case-view').scrollIntoView({ block: 'nearest' });
 }
 
@@ -1258,6 +1379,8 @@ function caseForm(existing) {
       <div style="flex:1"><label>${t('form_tags')}</label><input type="text" id="c-tags" value="${esc((c.tags || []).join(','))}" /></div>
       <div style="flex:1"><label>${t('form_test_file')}</label><input type="text" id="c-file" value="${esc(c.testFile || '')}" /></div>
     </div>
+    <label>${t('form_guards')}</label>
+    <input type="text" id="c-bugs" value="${esc((c.bugs || []).join(','))}" placeholder="BUG-1,BUG-2" />
     <div class="row" style="margin-top:12px"><button class="btn" id="c-cancel">${t('cancel')}</button>
       <button class="btn primary" id="c-save">${existing ? t('save') : t('create')}</button></div>`);
   $('#c-cancel').onclick = closeModalX;
@@ -1274,6 +1397,7 @@ function caseForm(existing) {
       steps: parseSteps($('#c-steps').value),
       tags: $('#c-tags').value.split(',').map(x => x.trim()).filter(Boolean),
       testFile: $('#c-file').value.trim() || null,
+      bugs: $('#c-bugs').value.split(',').map(x => x.trim()).filter(Boolean),
     };
     const saved = existing
       ? await api.send(`/api/testcases/${encodeURIComponent(existing.id)}?project=${encodeURIComponent(project)}`, 'PATCH', payload)
@@ -1334,6 +1458,10 @@ async function reportForm() {
       <div style="flex:1"><label>${t('report_batch')}</label><input type="text" id="rp-batch" /></div>
       <div style="flex:1"><label>${t('report_build')}</label><input type="text" id="rp-build" /></div>
     </div>
+    <div class="row">
+      <div style="flex:1"><label>${t('report_from')}</label><input type="date" id="rp-from" /></div>
+      <div style="flex:1"><label>${t('report_to')}</label><input type="date" id="rp-to" /></div>
+    </div>
     <label><input type="checkbox" id="rp-hot" style="width:auto" /> ${t('report_scope_hot')}</label>
     <div id="rp-out" style="margin-top:12px"></div>
     <div class="row" style="margin-top:12px"><button class="btn" id="rp-cancel">${t('close')}</button>
@@ -1343,6 +1471,9 @@ async function reportForm() {
     const params = new URLSearchParams({ project });
     if ($('#rp-batch').value.trim()) params.set('batch', $('#rp-batch').value.trim());
     if ($('#rp-build').value.trim()) params.set('build', $('#rp-build').value.trim());
+    // Date inputs are day-granular; widen to include the whole end day.
+    if ($('#rp-from').value) params.set('from', new Date($('#rp-from').value + 'T00:00:00').toISOString());
+    if ($('#rp-to').value) params.set('to', new Date($('#rp-to').value + 'T23:59:59').toISOString());
     if ($('#rp-hot').checked) params.set('hotOnly', 'true');
     const r = await api.get('/api/testreport?' + params.toString());
     $('#rp-out').innerHTML = `
