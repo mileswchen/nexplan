@@ -13,6 +13,18 @@ const DOC_TYPES = ['design', 'decision', 'adr', 'architecture', 'notes'] as cons
 const DOC_STATUS = ['draft', 'review', 'approved', 'superseded'] as const;
 const USER_ROLES = ['admin', 'member', 'viewer'] as const;
 const USER_KINDS = ['human', 'agent'] as const;
+const TESTCASE_TYPES = [
+  'functional',
+  'regression',
+  'integration',
+  'e2e',
+  'performance',
+  'security',
+  'usability',
+  'other',
+] as const;
+const TESTCASE_STATUSES = ['draft', 'active', 'deprecated'] as const;
+const TEST_RESULTS = ['pass', 'fail', 'blocked', 'skipped'] as const;
 
 const priorities = z.enum(PRIORITIES);
 const itemTypes = z.enum(ITEM_TYPES);
@@ -23,6 +35,9 @@ const docTypes = z.enum(DOC_TYPES);
 const docStatus = z.enum(DOC_STATUS);
 const userRoles = z.enum(USER_ROLES);
 const userKinds = z.enum(USER_KINDS);
+const testCaseTypes = z.enum(TESTCASE_TYPES);
+const testCaseStatuses = z.enum(TESTCASE_STATUSES);
+const testResults = z.enum(TEST_RESULTS);
 
 // A tool handler returns the MCP CallToolResult. `text` is the universal
 // representation; `structuredContent` is an optional JSON view for typed clients.
@@ -197,13 +212,21 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
         id: z.string(),
         note: z.string().optional().describe('Summary of what was done.'),
         closeLinkedBugs: z.boolean().optional().describe('Default true.'),
+        force: z.boolean().optional().describe('Complete even when linked test cases are failing or not run.'),
         author: z.string().optional(),
         project: projectOpt,
       }),
     },
     async (args) => {
-      const { store, actor } = await projectStore(workspace, args, { write: true });
-      return ok(await store.completeWorkItem(args.id, { note: args.note, closeLinkedBugs: args.closeLinkedBugs, author: actor }));
+      const { project, actor } = await projectStore(workspace, args, { write: true });
+      return ok(
+        await workspace.completeWorkItem(project, args.id, {
+          note: args.note,
+          closeLinkedBugs: args.closeLinkedBugs,
+          force: args.force,
+          author: actor,
+        }),
+      );
     },
   );
 
@@ -523,6 +546,264 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     async (args) => {
       await workspace.assertAdmin(args.author ?? 'agent');
       return ok(await workspace.updateUser(args.id, { name: args.name, kind: args.kind, role: args.role }));
+    },
+  );
+
+  // ---------------------------------------------- test cases / test runs
+
+  const testCaseBody = z.object({
+    title: z.string().min(1),
+    description: z.string().optional().describe('Purpose / scope of the case.'),
+    type: testCaseTypes.optional().describe('Default: functional.'),
+    priority: priorities.optional().describe('P0..P3 (maps to bug severity when a run fails). Default: P2.'),
+    status: testCaseStatuses.optional().describe('Default: draft; pass active to make it count in reports.'),
+    preconditions: z.string().optional(),
+    steps: z
+      .array(z.object({ action: z.string(), expected: z.string() }))
+      .optional()
+      .describe('Ordered steps with their expected result.'),
+    tags: z.array(z.string()).optional(),
+    workItem: z.string().nullish().describe('Work item (WI-N) this case verifies.'),
+    bugs: z.array(z.string()).optional().describe('Bug ids (BUG-N) this case guards.'),
+    automated: z.boolean().optional(),
+    testFile: z.string().nullish().describe('Automation locator, e.g. "test/store.test.ts::claims an item".'),
+  });
+
+  server.registerTool(
+    'nexplan_test_case_add',
+    {
+      title: 'Add test cases',
+      description:
+        'Create one or more reusable test cases. Link them to a work item with `workItem` so ' +
+        'verification and reports can trace them. Set status=active to include them in reports.',
+      inputSchema: z.object({
+        items: z.array(testCaseBody).min(1),
+        author: z.string().optional().describe('Attribution (agent or user name).'),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args, { write: true });
+      const created = [];
+      for (const item of args.items) created.push(await store.createTestCase({ ...item, author: actor }));
+      return ok({ created, count: created.length });
+    },
+  );
+
+  server.registerTool(
+    'nexplan_test_case_list',
+    {
+      title: 'List test cases',
+      description: 'List/filter test cases with their latest execution result (pass|fail|blocked|skipped|notRun).',
+      inputSchema: z.object({
+        status: z.union([testCaseStatuses, z.array(testCaseStatuses)]).optional(),
+        type: z.union([testCaseTypes, z.array(testCaseTypes)]).optional(),
+        priority: z.union([priorities, z.array(priorities)]).optional(),
+        workItem: z.string().optional().describe('Only cases linked to this work item.'),
+        bug: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+        automated: z.boolean().optional(),
+        lastResult: z.union([testResults, z.literal('notRun')]).optional(),
+        query: z.string().optional(),
+        limit: z.number().int().positive().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      return ok(await store.listTestCases(args as never));
+    },
+  );
+
+  server.registerTool(
+    'nexplan_test_case_get',
+    {
+      title: 'Get a test case',
+      description: 'Fetch one test case plus its recent execution history (newest first).',
+      inputSchema: z.object({
+        id: z.string().describe('Test case id, e.g. TC-3.'),
+        history: z.number().int().positive().optional().describe('How many recent runs to include. Default 10.'),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      const testCase = await store.getTestCase(args.id);
+      if (!testCase) throw new Error(`test case not found: ${args.id}`);
+      const history = await store.testCaseHistory(args.id, args.history ?? 10);
+      return ok({ testCase, history });
+    },
+  );
+
+  server.registerTool(
+    'nexplan_test_case_update',
+    {
+      title: 'Update a test case',
+      description: 'Update any editable field of a test case (including status → deprecated).',
+      inputSchema: z.object({
+        id: z.string(),
+        title: z.string().optional(),
+        description: z.string().optional(),
+        type: testCaseTypes.optional(),
+        priority: priorities.optional(),
+        status: testCaseStatuses.optional(),
+        preconditions: z.string().optional(),
+        steps: z.array(z.object({ action: z.string(), expected: z.string() })).optional(),
+        tags: z.array(z.string()).optional(),
+        workItem: z.string().nullish(),
+        bugs: z.array(z.string()).optional(),
+        automated: z.boolean().optional(),
+        testFile: z.string().nullish(),
+        author: z.string().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args, { write: true });
+      const { id, author: _a, project: _p, ...patch } = args;
+      return ok(await store.updateTestCase(id, patch as never, actor));
+    },
+  );
+
+  server.registerTool(
+    'nexplan_test_case_delete',
+    {
+      title: 'Delete a test case',
+      description:
+        'Delete a test case. Only its creator or an admin can delete it. Refuses while execution ' +
+        'records exist unless `force` is set (which deletes those runs too).',
+      inputSchema: z.object({
+        id: z.string(),
+        force: z.boolean().optional(),
+        author: z.string().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { project, actor } = await projectStore(workspace, args, { write: true });
+      return ok(await workspace.deleteTestCase(project, args.id, actor, { force: args.force }));
+    },
+  );
+
+  server.registerTool(
+    'nexplan_test_run_record',
+    {
+      title: 'Record test executions',
+      description:
+        'Record one or more test executions (the whole suite in a single call). Each run is an ' +
+        'immutable snapshot; a failing run can file a bug automatically (createBugOnFailure, default true), ' +
+        'a passing run advances the guarded bugs (open→fixed, and fixed→verified with verifyBugs). ' +
+        'Provide `caseId`, or `caseTitle` to reuse/auto-create a case.',
+      inputSchema: z.object({
+        runs: z
+          .array(
+            z.object({
+              caseId: z.string().optional().describe('Existing test case id (TC-N).'),
+              caseTitle: z.string().optional().describe('Case title; reused when it matches, otherwise auto-created.'),
+              result: testResults,
+              actual: z.string().optional().describe('Observed result.'),
+              evidence: z.string().optional().describe('Logs, stack trace, artifact paths.'),
+              environment: z.string().optional().describe('e.g. local | ci | staging.'),
+              build: z.string().optional().describe('Build / version / commit.'),
+              batch: z.string().optional().describe('Batch label, e.g. "v0.4.0 regression".'),
+              durationMs: z.number().nonnegative().nullish(),
+              executedAt: z.string().optional().describe('ISO timestamp; defaults to now.'),
+            }),
+          )
+          .min(1),
+        batch: z.string().optional().describe('Default batch label for every run in this call.'),
+        createBugOnFailure: z.boolean().optional().describe('Default true.'),
+        verifyBugs: z.boolean().optional().describe('Default false; advances fixed bugs to verified on pass.'),
+        autoCreateCase: z.boolean().optional().describe('Default true.'),
+        author: z.string().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args, { write: true });
+      const results = await store.recordTestRuns(
+        args.runs.map((run) => ({
+          ...run,
+          batch: run.batch ?? args.batch,
+          author: actor,
+          createBugOnFailure: args.createBugOnFailure !== false,
+          verifyBugs: args.verifyBugs === true,
+          autoCreateCase: args.autoCreateCase !== false,
+        })),
+      );
+      return ok({
+        runs: results.map((r) => r.run),
+        createdBugs: results.flatMap((r) => r.createdBugs),
+        updatedBugs: results.flatMap((r) => r.updatedBugs),
+        count: results.length,
+      });
+    },
+  );
+
+  server.registerTool(
+    'nexplan_test_run_list',
+    {
+      title: 'List test executions',
+      description: 'List execution records, hot and archived merged by default. Use hotOnly to skip archived runs.',
+      inputSchema: z.object({
+        caseId: z.string().optional(),
+        result: z.union([testResults, z.array(testResults)]).optional(),
+        build: z.string().optional(),
+        batch: z.string().optional(),
+        environment: z.string().optional(),
+        workItem: z.string().optional(),
+        executedBy: z.string().optional(),
+        since: z.string().optional().describe('ISO lower bound on executedAt.'),
+        until: z.string().optional().describe('ISO upper bound on executedAt.'),
+        from: z.string().optional().describe('Alias of `since`.'),
+        to: z.string().optional().describe('Alias of `until`.'),
+        includeArchived: z.boolean().optional().describe('Default true.'),
+        hotOnly: z.boolean().optional().describe('Default false; true = ignore archived runs.'),
+        limit: z.number().int().positive().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      const filter = {
+        ...args,
+        since: args.since ?? args.from,
+        until: args.until ?? args.to,
+        includeArchived: args.hotOnly ? false : args.includeArchived,
+      };
+      return ok(await store.listTestRuns(filter as never));
+    },
+  );
+
+  server.registerTool(
+    'nexplan_test_report',
+    {
+      title: 'Test report',
+      description:
+        'Pass rate, not-run cases, failing cases, flaky cases and work-item coverage for a batch, ' +
+        'build, work item or time range.',
+      inputSchema: z.object({
+        batch: z.string().optional(),
+        build: z.string().optional(),
+        workItem: z.string().optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        hotOnly: z.boolean().optional().describe('Default false; true = ignore archived runs.'),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      return ok(
+        await store.testReport({
+          batch: args.batch,
+          build: args.build,
+          workItem: args.workItem,
+          since: args.from,
+          until: args.to,
+          includeArchived: !args.hotOnly,
+        }),
+      );
     },
   );
 }

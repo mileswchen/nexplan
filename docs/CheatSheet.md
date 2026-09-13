@@ -102,9 +102,31 @@ args:    ["/abs/path/nexplan/dist/mcp/server.js"]
 env:     { NEXPLAN_BOARD: "...", NEXPLAN_PROJECT: "<key>", NEXPLAN_AGENT: "<agent>" }
 ```
 
-28 个 `nexplan_*` 工具：`backlog_add/list/get/claim/update/complete/decompose/note/delete`、
-`docs_list/get/create/update/history/diff/comment`、`bug_add/list/get/update`、`status`、`agent_next`、
-`project_list/create/set_default`、`user_list/add/update`。多数工具接受可选 `project` 与 `author` 参数。
+36 个 `nexplan_*` 工具：`backlog_add/list/get/claim/update/complete/decompose/note/delete`、
+`docs_list/get/create/update/history/diff/comment`、`bug_add/list/get/update`、
+`test_case_add/list/get/update/delete`、`test_run_record/list`、`test_report`、
+`status`、`agent_next`、`project_list/create/set_default`、`user_list/add/update`。
+多数工具接受可选 `project` 与 `author` 参数。
+
+## 测试用例与执行记录 / Test cases & runs
+
+| 命令 | 说明 |
+|---|---|
+| `nexplan test list [--status s] [--type t] [--priority p] [--work-item WI-1] [--last-result pass\|fail\|notRun]` | 列出用例（带最近结果） |
+| `nexplan test add "<标题>" [--work-item WI-1] [--step "操作\|期望"]... [--priority P1] [--status active]` | 新建用例 |
+| `nexplan test get <TC-1> [--history 5]` | 用例详情 + 执行历史 |
+| `nexplan test update <TC-1> [--status deprecated] [--work-item WI-1]` | 修改用例 |
+| `nexplan test rm <TC-1> [--force]` | 删除用例（有执行记录时需 `--force`） |
+| `nexplan test run <TC-1> --result fail --actual "..." [--evidence "..."] [--build v1] [--batch 回归] [--no-bug] [--verify]` | 记录一次执行 |
+| `nexplan test run --title "<新用例>" --result pass` | 未建用例时自动建 |
+| `nexplan test history [<TC-1>] [--result fail] [--batch b] [--from d] [--to d] [--hot-only]` | 执行记录（默认含归档） |
+| `nexplan test report [--batch b] [--build v] [--work-item WI-1]` | 通过率 / 未执行 / 失败 / flaky |
+| `nexplan config set-test-policy requirePassingOnComplete true` | 开启「用例全通过才能完成工作项」门禁 |
+| `nexplan config set-test-policy archive.hotMax 5000` | 归档阈值（热数据条数上限） |
+
+> `test run` 默认在**失败时自动建缺陷**（`--no-bug` 关闭）；`pass` 会把守护的缺陷
+> `open/reopened → fixed`，加 `--verify` 时再把 `fixed → verified`；`fail` 会把
+> `fixed/verified` 的缺陷 `→ reopened`。
 
 ## 状态枚举 / Enums
 
@@ -115,3 +137,6 @@ env:     { NEXPLAN_BOARD: "...", NEXPLAN_PROJECT: "<key>", NEXPLAN_AGENT: "<agen
 - 缺陷状态：`open in_progress fixed verified wontfix reopened`
 - 文档类型：`design decision adr architecture notes`
 - 文档状态：`draft review approved superseded`
+- 用例类型：`functional regression integration e2e performance security usability other`
+- 用例状态：`draft active deprecated`
+- 执行结果：`pass fail blocked skipped`

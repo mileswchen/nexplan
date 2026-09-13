@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { createHmac } from 'node:crypto';
+import type http from 'node:http';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { Store } from '../core/store.js';
 import { Workspace } from '../core/workspace.js';
 import { generateSecret } from '../core/auth.js';
-import { BugFilter, ListFilter, User } from '../core/types.js';
+import { BugFilter, ListFilter, TestCaseFilter, TestRunFilter, User } from '../core/types.js';
 
 export interface WebServerOptions {
   port?: number;
@@ -41,7 +42,7 @@ async function findPackageRoot(): Promise<string> {
   return process.cwd();
 }
 
-export async function startWebServer(opts: WebServerOptions = {}): Promise<void> {
+export async function startWebServer(opts: WebServerOptions = {}): Promise<http.Server> {
   const boardRoot = opts.root || process.env.NEXPLAN_BOARD || path.join(process.cwd(), '.nexplan');
   const workspace = new Workspace({
     root: boardRoot,
@@ -380,8 +381,16 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
 
   app.post('/api/workitems/:id/complete', async (req, res, next) => {
     try {
-      const { note, closeLinkedBugs } = req.body;
-      res.json(await (await storeFor(req, true)).completeWorkItem(req.params.id, { note, closeLinkedBugs, author: me(req) }));
+      const { note, closeLinkedBugs, force } = req.body;
+      const key = await workspace.resolveProject((req.query.project as string) || process.env.NEXPLAN_PROJECT);
+      res.json(
+        await workspace.completeWorkItem(key, req.params.id, {
+          note,
+          closeLinkedBugs,
+          force: Boolean(force),
+          author: me(req),
+        }),
+      );
     } catch (e) {
       next(e);
     }
@@ -527,6 +536,143 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
     }
   });
 
+  // ------------------------------------------------- test cases & test runs
+
+  app.get('/api/testcases', async (req, res, next) => {
+    try {
+      const store = await storeFor(req);
+      const { status, type, priority, workItem, bug, tags, automated, lastResult, query, limit } = req.query;
+      const cases = await store.listTestCases({
+        status: status ? String(status).split(',') : undefined,
+        type: type ? String(type).split(',') : undefined,
+        priority: priority ? String(priority).split(',') : undefined,
+        workItem: workItem ? String(workItem) : undefined,
+        bug: bug ? String(bug) : undefined,
+        tags: tags ? String(tags).split(',') : undefined,
+        automated: automated === undefined ? undefined : String(automated) === 'true',
+        lastResult: lastResult ? (String(lastResult) as never) : undefined,
+        query: query ? String(query) : undefined,
+        limit: limit ? Number(limit) : undefined,
+      } as unknown as TestCaseFilter);
+      res.json(cases);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/testcases', async (req, res, next) => {
+    try {
+      const store = await storeFor(req, true);
+      const items = Array.isArray(req.body) ? req.body : [req.body];
+      const created = [];
+      for (const item of items) created.push(await store.createTestCase({ ...item, author: me(req) }));
+      res.status(201).json(created);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.get('/api/testcases/:id', async (req, res, next) => {
+    try {
+      const store = await storeFor(req);
+      const testCase = await store.getTestCase(req.params.id);
+      if (!testCase) return res.status(404).json({ error: 'test case not found' });
+      const runs = await store.testCaseHistory(req.params.id, req.query.limit ? Number(req.query.limit) : 50);
+      res.json({ testCase, runs });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.patch('/api/testcases/:id', async (req, res, next) => {
+    try {
+      const { author: _author, ...patch } = req.body;
+      res.json(await (await storeFor(req, true)).updateTestCase(req.params.id, patch, me(req)));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.delete('/api/testcases/:id', async (req, res, next) => {
+    try {
+      const actor = me(req);
+      const key = await workspace.resolveProject((req.query.project as string) || process.env.NEXPLAN_PROJECT);
+      const force = req.query.force === '1' || req.query.force === 'true' || Boolean(req.body?.force);
+      res.json(await workspace.deleteTestCase(key, req.params.id, actor, { force }));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.get('/api/testruns', async (req, res, next) => {
+    try {
+      const store = await storeFor(req);
+      const { caseId, result, build, batch, environment, workItem, executedBy, from, to, hotOnly, limit } = req.query;
+      res.json(
+        await store.listTestRuns({
+          caseId: caseId ? String(caseId) : undefined,
+          result: result ? (String(result).split(',') as never) : undefined,
+          build: build ? String(build) : undefined,
+          batch: batch ? String(batch) : undefined,
+          environment: environment ? String(environment) : undefined,
+          workItem: workItem ? String(workItem) : undefined,
+          executedBy: executedBy ? String(executedBy) : undefined,
+          since: from ? String(from) : undefined,
+          until: to ? String(to) : undefined,
+          includeArchived: hotOnly === undefined ? undefined : String(hotOnly) !== 'true',
+          limit: limit ? Number(limit) : undefined,
+        } as TestRunFilter),
+      );
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/testruns', async (req, res, next) => {
+    try {
+      const store = await storeFor(req, true);
+      const actor = me(req);
+      const body = req.body ?? {};
+      const items = Array.isArray(body) ? body : Array.isArray(body.runs) ? body.runs : [body];
+      const results = await store.recordTestRuns(
+        items.map((run: Record<string, unknown>) => ({
+          ...(run as object),
+          batch: (run.batch as string) ?? (body.batch as string),
+          author: actor,
+          createBugOnFailure: body.createBugOnFailure !== false,
+          verifyBugs: body.verifyBugs === true,
+          autoCreateCase: body.autoCreateCase !== false,
+        })) as never,
+      );
+      res.status(201).json({
+        runs: results.map((r) => r.run),
+        createdBugs: results.flatMap((r) => r.createdBugs),
+        updatedBugs: results.flatMap((r) => r.updatedBugs),
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.get('/api/testreport', async (req, res, next) => {
+    try {
+      const store = await storeFor(req);
+      const key = await workspace.resolveProject((req.query.project as string) || process.env.NEXPLAN_PROJECT);
+      const { batch, build, workItem, from, to, hotOnly } = req.query;
+      const report = await store.testReport({
+        batch: batch ? String(batch) : undefined,
+        build: build ? String(build) : undefined,
+        workItem: workItem ? String(workItem) : undefined,
+        since: from ? String(from) : undefined,
+        until: to ? String(to) : undefined,
+        includeArchived: hotOnly === undefined ? undefined : String(hotOnly) !== 'true',
+      });
+      res.json({ ...report, projectKey: key });
+    } catch (e) {
+      next(e);
+    }
+  });
+
   // fallthrough (SPA routing)
   app.get('*', (_req, res) => {
     res.sendFile(path.join(publicDir, 'index.html'));
@@ -540,12 +686,14 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   const host = opts.host ?? process.env.HOST ?? '127.0.0.1';
   const remote = !['127.0.0.1', 'localhost', '::1'].includes(host.toLowerCase());
   const server = app.listen(port, host, () => {
-    process.stdout.write(`\n  NexPlan dashboard → http://127.0.0.1:${port}\n`);
+    const bound = server.address();
+    const actualPort = typeof bound === 'object' && bound ? bound.port : port;
+    process.stdout.write(`\n  NexPlan dashboard → http://127.0.0.1:${actualPort}\n`);
     if (remote) {
       // Bound to all interfaces (or a LAN IP): print every address other
       // machines on the network can use to open the dashboard.
       for (const ip of lanIPv4Addresses()) {
-        process.stdout.write(`  LAN access        → http://${ip}:${port}\n`);
+        process.stdout.write(`  LAN access        → http://${ip}:${actualPort}\n`);
       }
       process.stdout.write(`  (bound to ${host} — anyone on your network can reach the login page;\n`);
       process.stdout.write(`   change the default admin password: nexplan user password admin <pw>)\n`);
@@ -556,6 +704,9 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<void>
   const shutdown = () => server.close(() => process.exit(0));
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  // Expose the server so tests (and embedders) can await the real port.
+  (server as http.Server & { nexplanWorkspace?: Workspace }).nexplanWorkspace = workspace;
+  return server;
 }
 
 // Allow direct execution (`node dist/web/server.js`, `tsx src/web/server.ts`)

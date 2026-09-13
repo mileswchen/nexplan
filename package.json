@@ -1,6 +1,6 @@
 {
   "name": "nexplan",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "NexPlan — a git-backed, MCP-based project management hub for coding agents (dsh / codex / claude code / open code).",
   "type": "module",
   "bin": {

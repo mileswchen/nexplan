@@ -19,9 +19,22 @@ import {
   ListFilter,
   Note,
   Priority,
+  RecordRunResult,
+  TestCase,
+  TestCaseFilter,
+  TestCaseStatus,
+  TestCaseType,
+  TestCaseWithStatus,
+  TestReport,
+  TestReportFilter,
+  TestResult,
+  TestRun,
+  TestRunFilter,
+  TestStep,
   WorkItem,
   WorkItemStatus,
   WorkItemType,
+  WorkItemVerification,
 } from './types.js';
 
 export interface StoreOptions {
@@ -35,9 +48,33 @@ interface ProjectMeta {
   createdAt: string;
 }
 
-// Serializable view of a work item / bug for JSON on disk.
+/**
+ * Persisted id counters + archive bookkeeping for one project
+ * (`<project>/.counters.json`). Kept in git so id allocation survives
+ * deletion/archiving of the highest-numbered record — see §13.6 of the design
+ * doc: scanning the directory for `max + 1` would reuse ids once records are
+ * removed, silently repointing references (bug.workItem, case.workItem, …).
+ */
+interface Counters {
+  WI?: number;
+  BUG?: number;
+  TC?: number;
+  TR?: number;
+  /** Number of runs moved out of the hot directory into archive bundles. */
+  TR_ARCHIVED?: number;
+  /** Earliest `executedAt` among hot runs (O(1) archive time gate). */
+  oldestHotAt?: string | null;
+  lastEvalAt?: string | null;
+  lastArchiveAt?: string | null;
+}
+
+type CounterKey = 'WI' | 'BUG' | 'TC' | 'TR';
+
+// Serializable view of a work item / bug / test record for JSON on disk.
 type Wi = Omit<WorkItem, never> & { schema: 'workitem' };
 type Bg = Omit<Bug, never> & { schema: 'bug' };
+type Tc = Omit<TestCase, never> & { schema: 'testcase' };
+type Tr = Omit<TestRun, never> & { schema: 'testrun' };
 
 const WORKITEM_TYPES: WorkItemType[] = ['task', 'feature', 'refactor', 'chore', 'research', 'bug', 'docs'];
 const WORKITEM_STATUSES: WorkItemStatus[] = ['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked'];
@@ -45,6 +82,27 @@ const PRIORITIES: Priority[] = ['P0', 'P1', 'P2', 'P3'];
 const BUG_SEVERITIES: BugSeverity[] = ['critical', 'major', 'minor', 'trivial'];
 const BUG_STATUSES: BugStatus[] = ['open', 'in_progress', 'fixed', 'verified', 'wontfix', 'reopened'];
 const DOC_TYPES: DocType[] = ['design', 'decision', 'adr', 'architecture', 'notes'];
+const TESTCASE_TYPES: TestCaseType[] = [
+  'functional',
+  'regression',
+  'integration',
+  'e2e',
+  'performance',
+  'security',
+  'usability',
+  'other',
+];
+const TESTCASE_STATUSES: TestCaseStatus[] = ['draft', 'active', 'deprecated'];
+const TEST_RESULTS: TestResult[] = ['pass', 'fail', 'blocked', 'skipped'];
+
+/** Test case priority → bug severity, used when a failing run files a bug. */
+const PRIORITY_TO_SEVERITY: Record<Priority, BugSeverity> = {
+  P0: 'critical',
+  P1: 'major',
+  P2: 'minor',
+  P3: 'trivial',
+};
+
 
 // A permissive filter spec that applies to both work items and bugs; the
 // concrete `ListFilter` / `BugFilter` types narrow the exposed API.
@@ -79,6 +137,9 @@ export class Store {
     workitems: 'workitems' as string,
     bugs: 'bugs' as string,
     docs: 'docs' as string,
+    testcases: 'testcases' as string,
+    testruns: 'testruns' as string,
+    testrunsArchive: 'testruns/archive' as string,
   };
 
   constructor(opts: StoreOptions) {
@@ -90,6 +151,9 @@ export class Store {
     this.dirs.workitems = path.join(this.root, 'workitems');
     this.dirs.bugs = path.join(this.root, 'bugs');
     this.dirs.docs = path.join(this.root, 'docs');
+    this.dirs.testcases = path.join(this.root, 'testcases');
+    this.dirs.testruns = path.join(this.root, 'testruns');
+    this.dirs.testrunsArchive = path.join(this.dirs.testruns, 'archive');
   }
 
   // ---------------------------------------------------------------- lifecycle
@@ -98,6 +162,8 @@ export class Store {
     await fs.mkdir(this.dirs.workitems, { recursive: true });
     await fs.mkdir(this.dirs.bugs, { recursive: true });
     await fs.mkdir(this.dirs.docs, { recursive: true });
+    await fs.mkdir(this.dirs.testcases, { recursive: true });
+    await fs.mkdir(this.dirs.testruns, { recursive: true });
     await this.git.init();
 
     const cfgPath = path.join(this.root, 'nexplan.json');
@@ -161,10 +227,15 @@ export class Store {
     }
   }
 
-  private tx<T>(fn: () => Promise<T>, message: string): Promise<T> {
+  /**
+   * Run a mutation under the store mutex and commit it. The message may be a
+   * factory so id allocation can happen inside the critical section (ids are
+   * read-modify-write on `.counters.json` and must not race).
+   */
+  private tx<T>(fn: () => Promise<T>, message: string | ((result: T) => string)): Promise<T> {
     return this.mutex.runExclusive(async () => {
       const result = await fn();
-      await this.commit(message);
+      await this.commit(typeof message === 'function' ? message(result) : message);
       return result;
     });
   }
@@ -181,16 +252,65 @@ export class Store {
   private docCommentsPath(slug: string): string {
     return path.join(this.dirs.docs, `${slug}.comments.json`);
   }
+  private testCasePath(id: string): string {
+    return path.join(this.dirs.testcases, `${id}.json`);
+  }
+  private testRunPath(id: string): string {
+    return path.join(this.dirs.testruns, `${id}.json`);
+  }
+  private countersPath(): string {
+    return path.join(this.root, '.counters.json');
+  }
 
-  private async nextId(prefix: 'WI' | 'BUG'): Promise<string> {
-    const dir = prefix === 'WI' ? this.dirs.workitems : this.dirs.bugs;
+  // ------------------------------------------------------------- id counters
+
+  async readCounters(): Promise<Counters> {
+    return (await this.readJson<Counters>(this.countersPath())) ?? {};
+  }
+
+  private async writeCounters(counters: Counters): Promise<void> {
+    await this.writeJson(this.countersPath(), counters);
+  }
+
+  /** Merge a patch into `.counters.json`. Callers inside `tx()` get it committed. */
+  async patchCounters(patch: Partial<Counters>): Promise<Counters> {
+    const next = { ...(await this.readCounters()), ...patch };
+    await this.writeCounters(next);
+    return next;
+  }
+
+  /** Highest existing id for a prefix, by scanning the data directory (legacy fallback). */
+  private async scanMaxId(prefix: CounterKey): Promise<number> {
+    const dir =
+      prefix === 'WI'
+        ? this.dirs.workitems
+        : prefix === 'BUG'
+          ? this.dirs.bugs
+          : prefix === 'TC'
+            ? this.dirs.testcases
+            : this.dirs.testruns;
     const files = await this.readDir(dir);
     let max = 0;
     for (const f of files) {
       const m = /^(\w+)-(\d+)\.json$/.exec(f);
       if (m && m[1] === prefix) max = Math.max(max, parseInt(m[2], 10));
     }
-    return `${prefix}-${max + 1}`;
+    return max;
+  }
+
+  /**
+   * Allocate the next id for a prefix. Prefers the persisted counter so ids are
+   * never reused after a record is deleted or archived; falls back to scanning
+   * the directory for workspaces created before counters existed.
+   */
+  private async nextId(prefix: CounterKey): Promise<string> {
+    const counters = await this.readCounters();
+    const known = counters[prefix];
+    const max = typeof known === 'number' && Number.isFinite(known) ? known : await this.scanMaxId(prefix);
+    const next = max + 1;
+    counters[prefix] = next;
+    await this.writeCounters(counters);
+    return `${prefix}-${next}`;
   }
 
   private note(author: string, body: string): Note {
@@ -214,35 +334,35 @@ export class Store {
     docLink?: string | null;
     author?: string;
   }): Promise<WorkItem> {
-    const now = NOW();
-    const id = await this.nextId('WI');
     const author = input.author ?? this.agentName;
-    const item: Wi = {
-      schema: 'workitem',
-      id,
-      type: input.type ?? 'task',
-      title: input.title.trim(),
-      description: input.description?.trim() ?? '',
-      status: input.status ?? 'backlog',
-      priority: input.priority ?? 'P2',
-      assignee: input.assignee ?? null,
-      source: input.source ?? (author === 'user' ? 'manual' : 'agent'),
-      parent: input.parent ?? null,
-      children: [],
-      tags: input.tags ?? [],
-      estimate: input.estimate ?? null,
-      fixesBug: input.fixesBug ?? [],
-      docLink: input.docLink ?? null,
-      createdBy: author,
-      createdAt: now,
-      updatedAt: now,
-      completedAt: null,
-      notes: [],
-    };
     return this.tx(async () => {
+      const now = NOW();
+      const id = await this.nextId('WI');
+      const item: Wi = {
+        schema: 'workitem',
+        id,
+        type: input.type ?? 'task',
+        title: input.title.trim(),
+        description: input.description?.trim() ?? '',
+        status: input.status ?? 'backlog',
+        priority: input.priority ?? 'P2',
+        assignee: input.assignee ?? null,
+        source: input.source ?? (author === 'user' ? 'manual' : 'agent'),
+        parent: input.parent ?? null,
+        children: [],
+        tags: input.tags ?? [],
+        estimate: input.estimate ?? null,
+        fixesBug: input.fixesBug ?? [],
+        docLink: input.docLink ?? null,
+        createdBy: author,
+        createdAt: now,
+        updatedAt: now,
+        completedAt: null,
+        notes: [],
+      };
       await this.writeJson(this.wiPath(id), item);
       return item as unknown as WorkItem;
-    }, `workitem: create ${id} ${clip(item.title)}`);
+    }, (item) => `workitem: create ${item.id} ${clip(item.title)}`);
   }
 
   async listWorkItems(filter: ListFilter = {}): Promise<WorkItem[]> {
@@ -326,14 +446,23 @@ export class Store {
 
   async completeWorkItem(
     id: string,
-    opts: { note?: string; closeLinkedBugs?: boolean; author?: string } = {},
-  ): Promise<{ item: WorkItem; closedBugs: Bug[] }> {
+    opts: { note?: string; closeLinkedBugs?: boolean; author?: string; force?: boolean } = {},
+  ): Promise<{ item: WorkItem; closedBugs: Bug[]; verification: WorkItemVerification }> {
     const existing = await this.getWorkItem(id);
     if (!existing) throw new Error(`work item not found: ${id}`);
     const updater = opts.author ?? this.agentName;
     const now = NOW();
+    const verification = await this.verificationForWorkItem(id);
     const notes = existing.notes.slice();
     if (opts.note) notes.push(this.note(updater, opts.note));
+    if (verification.fail > 0 && !opts.force) {
+      notes.push(
+        this.note(
+          updater,
+          `tests: ${verification.fail} of ${verification.cases} linked case(s) failing — ${verification.failing.join(', ')}`,
+        ),
+      );
+    }
     notes.push(this.note(updater, 'complete → done'));
     const updated = {
       ...existing,
@@ -363,7 +492,7 @@ export class Store {
           closedBugs.push(fixed);
         }
       }
-      return { item: updated, closedBugs };
+      return { item: updated, closedBugs, verification };
     }, `workitem: complete ${id}`);
   }
 
@@ -478,9 +607,31 @@ export class Store {
     tags?: string[];
     author?: string;
   }): Promise<Bug> {
+    return this.tx(
+      () => this.createBugInner(input),
+      (bug) => `bug: create ${bug.id} ${clip(bug.title)}`,
+    );
+  }
+
+  /** Non-transactional core so run recording can file bugs inside its own tx. */
+  private async createBugInner(input: {
+    title: string;
+    description?: string;
+    severity?: BugSeverity;
+    status?: BugStatus;
+    foundBy?: ItemSource;
+    foundByAgent?: string | null;
+    evidence?: string;
+    assignee?: string | null;
+    workItem?: string | null;
+    tags?: string[];
+    author?: string;
+    testCase?: string | null;
+    testRun?: string | null;
+  }): Promise<Bug> {
+    const author = input.author ?? this.agentName;
     const now = NOW();
     const id = await this.nextId('BUG');
-    const author = input.author ?? this.agentName;
     const bug: Bg = {
       schema: 'bug',
       id,
@@ -498,14 +649,14 @@ export class Store {
       createdAt: now,
       updatedAt: now,
       closedAt: null,
+      testCase: input.testCase ?? null,
+      testRun: input.testRun ?? null,
       notes: input.evidence?.trim()
         ? [this.note(author, `evidence: ${input.evidence.trim()}`), this.note(author, 'bug reported')]
         : [this.note(author, 'bug reported')],
     };
-    return this.tx(async () => {
-      await this.writeJson(this.bugPath(id), bug);
-      return bug as unknown as Bug;
-    }, `bug: create ${id} ${clip(bug.title)}`);
+    await this.writeJson(this.bugPath(id), bug);
+    return bug as unknown as Bug;
   }
 
   async listBugs(filter: BugFilter = {}): Promise<Bug[]> {
@@ -524,17 +675,678 @@ export class Store {
   }
 
   async updateBug(id: string, patch: Partial<Bug>, author?: string): Promise<Bug> {
+    const updater = author ?? this.agentName;
+    return this.tx(() => this.updateBugInner(id, patch, updater), `bug: update ${id} (${updater})`);
+  }
+
+  /** Non-transactional core so run recording can advance bugs inside its own tx. */
+  private async updateBugInner(id: string, patch: Partial<Bug>, author?: string): Promise<Bug> {
     const existing = await this.getBug(id);
     if (!existing) throw new Error(`bug not found: ${id}`);
     const updater = author ?? this.agentName;
     let closedAt = existing.closedAt;
     const status = patch.status ?? existing.status;
     if (['fixed', 'verified', 'wontfix'].includes(status) && !closedAt) closedAt = NOW();
+    if (status === 'reopened') closedAt = null;
     const updated = { ...existing, ...patch, id, status, closedAt, updatedAt: NOW() } as Bug;
+    await this.writeJson(this.bugPath(id), updated);
+    return updated;
+  }
+
+  // -------------------------------------------------------------- test cases
+
+  async createTestCase(input: {
+    title: string;
+    description?: string;
+    type?: TestCaseType;
+    priority?: Priority;
+    status?: TestCaseStatus;
+    preconditions?: string;
+    steps?: TestStep[];
+    tags?: string[];
+    workItem?: string | null;
+    bugs?: string[];
+    automated?: boolean;
+    testFile?: string | null;
+    author?: string;
+  }): Promise<TestCase> {
+    return this.tx(
+      () => this.createTestCaseInner(input),
+      (tc) => `testcase: create ${tc.id} ${clip(tc.title)}`,
+    );
+  }
+
+  /** Non-transactional core (run recording may auto-create a case inside its tx). */
+  private async createTestCaseInner(input: {
+    title: string;
+    description?: string;
+    type?: TestCaseType;
+    priority?: Priority;
+    status?: TestCaseStatus;
+    preconditions?: string;
+    steps?: TestStep[];
+    tags?: string[];
+    workItem?: string | null;
+    bugs?: string[];
+    automated?: boolean;
+    testFile?: string | null;
+    author?: string;
+  }): Promise<TestCase> {
+    const author = input.author ?? this.agentName;
+    const now = NOW();
+    const id = await this.nextId('TC');
+    const tc: Tc = {
+      schema: 'testcase',
+      id,
+      title: input.title.trim(),
+      description: input.description?.trim() ?? '',
+      type: input.type ?? 'functional',
+      priority: input.priority ?? 'P2',
+      status: input.status ?? 'draft',
+      preconditions: input.preconditions?.trim() ?? '',
+      steps: (input.steps ?? []).map((s) => ({ action: s.action ?? '', expected: s.expected ?? '' })),
+      tags: input.tags ?? [],
+      workItem: input.workItem ?? null,
+      bugs: input.bugs ?? [],
+      automated: input.automated ?? false,
+      testFile: input.testFile ?? null,
+      createdBy: author,
+      createdAt: now,
+      updatedAt: now,
+      notes: [],
+    };
+    await this.writeJson(this.testCasePath(id), tc);
+    return tc as unknown as TestCase;
+  }
+
+  /**
+   * List cases with derived run statistics. The latest-result scan reads hot run
+   * files newest-id-first and stops as soon as every case is resolved, so the
+   * common list/badge path stays O(cases) instead of O(runs).
+   */
+  async listTestCases(
+    filter: TestCaseFilter = {},
+    opts: { withLastRun?: boolean; withRunCount?: boolean; includeArchived?: boolean } = {},
+  ): Promise<TestCaseWithStatus[]> {
+    const files = (await this.readDir(this.dirs.testcases)).filter((f) => f.endsWith('.json'));
+    const cases: TestCase[] = [];
+    for (const f of files) {
+      const tc = await this.readJson<TestCase>(this.testCasePath(f.replace(/\.json$/, '')));
+      if (tc) cases.push(tc);
+    }
+    const withLastRun = opts.withLastRun !== false;
+    const stats = withLastRun
+      ? await this.collectRunStats(new Set(cases.map((c) => c.id)), {
+          includeArchived: opts.includeArchived !== false,
+          countAll: opts.withRunCount === true,
+        })
+      : new Map<string, { last: TestRun | null; count: number | null }>();
+
+    let out: TestCaseWithStatus[] = cases.map((c) => {
+      const st = stats.get(c.id);
+      return {
+        ...c,
+        lastResult: st?.last ? st.last.result : null,
+        lastRunAt: st?.last ? st.last.executedAt : null,
+        lastBuild: st?.last ? st.last.build : null,
+        runCount: opts.withRunCount ? (st?.count ?? 0) : null,
+      };
+    });
+
+    out = out.filter((c) => matchesTestCaseFilter(c, filter));
+    out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    if (filter.limit) out = out.slice(0, filter.limit);
+    return out;
+  }
+
+  async getTestCase(id: string): Promise<TestCase | null> {
+    return (await this.readJson<TestCase>(this.testCasePath(id))) ?? null;
+  }
+
+  async updateTestCase(
+    id: string,
+    patch: Partial<TestCase>,
+    author?: string,
+  ): Promise<TestCase> {
+    const updater = author ?? this.agentName;
+    return this.tx(
+      () => this.updateTestCaseInner(id, patch, updater),
+      `testcase: update ${id} (${updater})`,
+    );
+  }
+
+  private async updateTestCaseInner(id: string, patch: Partial<TestCase>, author?: string): Promise<TestCase> {
+    const existing = await this.getTestCase(id);
+    if (!existing) throw new Error(`test case not found: ${id}`);
+    const updated = { ...existing, ...patch, id, updatedAt: NOW() } as TestCase;
+    await this.writeJson(this.testCasePath(id), updated);
+    return updated;
+  }
+
+  /**
+   * Delete a test case. Refuses while execution records exist unless `force`,
+   * which removes the case's hot runs too (bug provenance fields are left as
+   * historical record).
+   */
+  async deleteTestCase(id: string, opts: { force?: boolean } = {}): Promise<{ deleted: TestCase; deletedRuns: number }> {
+    const existing = await this.getTestCase(id);
+    if (!existing) throw new Error(`test case not found: ${id}`);
+    const runIds = (await this.listTestRuns({ caseId: id })).map((r) => r.id);
+    const archived = (await this.readArchivedRuns()).filter((r) => r.caseId === id).length;
+    const totalRuns = runIds.length + archived;
+    if (totalRuns > 0 && !opts.force) {
+      throw new Error(
+        `cannot delete ${id}: it still has ${totalRuns} execution record(s) — use force to delete them too`,
+      );
+    }
     return this.tx(async () => {
-      await this.writeJson(this.bugPath(id), updated);
-      return updated;
-    }, `bug: update ${id} (${updater})`);
+      let deletedRuns = 0;
+      for (const runId of runIds) {
+        await fs.rm(this.testRunPath(runId), { force: true });
+        deletedRuns++;
+      }
+      if (archived > 0) deletedRuns += await this.removeArchivedRuns((r) => r.caseId === id);
+      await fs.rm(this.testCasePath(id), { force: true });
+      return { deleted: existing, deletedRuns };
+    }, `testcase: delete ${id}`);
+  }
+
+  // --------------------------------------------------------------- test runs
+
+  async recordTestRun(input: RecordTestRunInput): Promise<RecordRunResult> {
+    return this.tx(() => this.recordTestRunInner(input), (res) => {
+      const extra = res.createdBugs.length ? ` +${res.createdBugs.map((b) => b.id).join(',')}` : '';
+      return `test: run ${res.run.id} ${res.run.caseId} ${res.run.result} (${res.run.executedBy})${extra}`;
+    });
+  }
+
+  /**
+   * Record many runs in ONE commit (agents report a whole suite at once).
+   * Every run still gets its own file; only the git commit is shared.
+   */
+  async recordTestRuns(inputs: RecordTestRunInput[]): Promise<RecordRunResult[]> {
+    if (!inputs.length) return [];
+    return this.tx(
+      async () => {
+        const out: RecordRunResult[] = [];
+        for (const input of inputs) out.push(await this.recordTestRunInner(input));
+        return out;
+      },
+      (results) => {
+        const counts = results.reduce<Record<string, number>>((acc, r) => {
+          acc[r.run.result] = (acc[r.run.result] ?? 0) + 1;
+          return acc;
+        }, {});
+        const summary = Object.entries(counts)
+          .map(([k, v]) => `${k} ${v}`)
+          .join('/');
+        const bugs = [...new Set(results.flatMap((r) => r.createdBugs.map((b) => b.id)))];
+        const first = results[0]?.run.id ?? '';
+        const last = results[results.length - 1]?.run.id ?? '';
+        return `test: run ${first}..${last} (${results.length}) ${summary}${bugs.length ? ` +${bugs.join(',')}` : ''}`;
+      },
+    );
+  }
+
+  /** Non-transactional core: one run plus every side effect lands in one commit. */
+  private async recordTestRunInner(input: RecordTestRunInput): Promise<RecordRunResult> {
+    const author = input.author ?? this.agentName;
+    const now = NOW();
+
+    // --- resolve (or auto-create) the test case -----------------------------
+    let testCase: TestCase | null = null;
+    if (input.caseId) {
+      testCase = await this.getTestCase(input.caseId);
+      if (!testCase) throw new Error(`test case not found: ${input.caseId}`);
+    } else if (input.caseTitle?.trim()) {
+      const title = input.caseTitle.trim();
+      const all = (await this.listTestCases({}, { withLastRun: false })) as unknown as TestCase[];
+      const matches = all.filter((c) => c.title.toLowerCase() === title.toLowerCase());
+      testCase =
+        matches.find((c) => c.status === 'active') ??
+        matches.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ??
+        null;
+      if (!testCase) {
+        if (input.autoCreateCase === false) throw new Error(`test case not found by title: ${title}`);
+        testCase = await this.createTestCaseInner({ title, status: 'active', author });
+      }
+    } else {
+      throw new Error('recordTestRun requires caseId or caseTitle');
+    }
+
+    // --- create the run record (snapshot fields are frozen here) -------------
+    const runId = await this.nextId('TR');
+    const executedAt = input.executedAt ?? now;
+    const run: Tr = {
+      schema: 'testrun',
+      id: runId,
+      caseId: testCase.id,
+      caseTitle: testCase.title,
+      workItem: testCase.workItem ?? null,
+      result: input.result,
+      actual: input.actual?.trim() ?? '',
+      evidence: input.evidence?.trim() ?? '',
+      environment: input.environment?.trim() ?? '',
+      build: input.build?.trim() ?? '',
+      batch: input.batch?.trim() ?? '',
+      durationMs: typeof input.durationMs === 'number' ? input.durationMs : null,
+      bugIds: [],
+      executedBy: author,
+      executedAt,
+      notes: [],
+    };
+
+    const where = [run.build && `build ${run.build}`, run.environment && `env ${run.environment}`]
+      .filter(Boolean)
+      .join(', ');
+    const linked = await this.linkedBugsForCase(testCase);
+    const createdBugs: Bug[] = [];
+    const updatedBugs: Bug[] = [];
+
+    // --- R2: file a bug on failure (deduplicated) ---------------------------
+    if (run.result === 'fail' && input.createBugOnFailure) {
+      const alreadyOpen = linked.find((b) => b.status === 'open' || b.status === 'reopened');
+      if (alreadyOpen) {
+        updatedBugs.push(
+          await this.updateBugInner(
+            alreadyOpen.id,
+            {
+              testRun: run.id,
+              notes: [
+                ...alreadyOpen.notes,
+                this.note(author, `${run.id} failed again${where ? ` (${where})` : ''}: ${clip(run.actual || run.evidence || run.caseTitle, 160)}`),
+              ],
+            },
+            author,
+          ),
+        );
+      } else {
+        const evidence = [run.actual && `actual: ${run.actual}`, run.evidence, where && `(${where})`]
+          .filter(Boolean)
+          .join('\n');
+        createdBugs.push(
+          await this.createBugInner({
+            title: `[${testCase.id}] ${testCase.title} failed`,
+            description: `Failing test case ${testCase.id}${run.batch ? ` in batch "${run.batch}"` : ''}.`,
+            severity: PRIORITY_TO_SEVERITY[testCase.priority] ?? 'minor',
+            evidence,
+            workItem: testCase.workItem ?? null,
+            tags: [...new Set([...testCase.tags, 'from-test'])],
+            author,
+            testCase: testCase.id,
+            testRun: run.id,
+          }),
+        );
+      }
+    }
+
+    // --- R3: advance / regress the bugs this case guards --------------------
+    for (const bug of linked) {
+      if (run.result === 'pass') {
+        if (bug.status === 'open' || bug.status === 'reopened') {
+          updatedBugs.push(
+            await this.updateBugInner(
+              bug.id,
+              {
+                status: 'fixed',
+                notes: [...bug.notes, this.note(author, `${run.id} passed (${testCase.id}${where ? `, ${where}` : ''}) → fixed`)],
+              },
+              author,
+            ),
+          );
+        } else if (bug.status === 'fixed' && input.verifyBugs) {
+          updatedBugs.push(
+            await this.updateBugInner(
+              bug.id,
+              {
+                status: 'verified',
+                notes: [...bug.notes, this.note(author, `${run.id} passed (${testCase.id}${where ? `, ${where}` : ''}) → verified`)],
+              },
+              author,
+            ),
+          );
+        }
+      } else if (run.result === 'fail' && (bug.status === 'fixed' || bug.status === 'verified')) {
+        updatedBugs.push(
+          await this.updateBugInner(
+            bug.id,
+            {
+              status: 'reopened',
+              notes: [
+                ...bug.notes,
+                this.note(author, `${run.id} failed (${testCase.id}${where ? `, ${where}` : ''}) → reopened: ${clip(run.actual || run.evidence, 160)}`),
+              ],
+            },
+            author,
+          ),
+        );
+      }
+    }
+
+    run.bugIds = [...new Set([...createdBugs.map((b) => b.id), ...updatedBugs.map((b) => b.id)])];
+    await this.writeJson(this.testRunPath(run.id), run);
+
+    // Keep the case's note trail (and updatedAt) in step with its runs.
+    const updatedCase = await this.updateTestCaseInner(
+      testCase.id,
+      {
+        notes: [
+          ...testCase.notes,
+          this.note(author, `${run.id} ${run.result}${where ? ` (${where})` : ''}`),
+        ],
+      },
+      author,
+    );
+
+    // O(1) archive time gate bookkeeping (see design §13.3).
+    const counters = await this.readCounters();
+    const oldest = counters.oldestHotAt ?? null;
+    if (!oldest || executedAt < oldest) counters.oldestHotAt = executedAt;
+    await this.writeCounters(counters);
+
+    return { run: run as unknown as TestRun, testCase: updatedCase, createdBugs, updatedBugs };
+  }
+
+  /**
+   * List runs, hot and (by default) archived merged. A plain "newest N" query
+   * reads only N hot files; filtered queries scan the hot directory.
+   */
+  async listTestRuns(filter: TestRunFilter = {}): Promise<TestRun[]> {
+    const includeArchived = filter.includeArchived !== false;
+    const filtered = Boolean(
+      filter.caseId ||
+        filter.result ||
+        filter.build ||
+        filter.batch ||
+        filter.environment ||
+        filter.workItem ||
+        filter.executedBy ||
+        filter.since ||
+        filter.until,
+    );
+    const out: TestRun[] = [];
+    const fastPath = !filtered && typeof filter.limit === 'number' && filter.limit > 0;
+
+    for (const runId of await this.hotRunIdsDesc()) {
+      const run = await this.getTestRun(runId);
+      if (!run) continue;
+      if (fastPath) {
+        out.push(run);
+        if (out.length >= (filter.limit as number)) break;
+      } else if (matchesRunFilter(run, filter)) {
+        out.push(run);
+      }
+    }
+
+    if (includeArchived) {
+      for (const run of await this.readArchivedRuns()) {
+        if (matchesRunFilter(run, filter)) out.push(run);
+      }
+    }
+
+    out.sort(compareRunsDesc);
+    return filter.limit ? out.slice(0, filter.limit) : out;
+  }
+
+  async getTestRun(id: string): Promise<TestRun | null> {
+    return (await this.readJson<TestRun>(this.testRunPath(id))) ?? null;
+  }
+
+  /** Execution history for one case (newest first), hot + archived merged. */
+  async testCaseHistory(caseId: string, limit = 100): Promise<TestRun[]> {
+    return this.listTestRuns({ caseId, limit });
+  }
+
+  async deleteTestRun(id: string, opts: { force?: boolean } = {}): Promise<TestRun> {
+    if (!opts.force) throw new Error(`refusing to delete ${id}: execution records are immutable (pass force)`);
+    const hot = await this.getTestRun(id);
+    if (hot) {
+      return this.tx(async () => {
+        await fs.rm(this.testRunPath(id), { force: true });
+        const counters = await this.readCounters();
+        counters.TR_ARCHIVED = counters.TR_ARCHIVED ?? 0;
+        await this.writeCounters(counters);
+        return hot;
+      }, `test: delete ${id}`);
+    }
+    const archived = (await this.readArchivedRuns()).find((r) => r.id === id);
+    if (!archived) throw new Error(`test run not found: ${id}`);
+    await this.tx(() => this.removeArchivedRuns((r) => r.id === id), `test: delete archived ${id}`);
+    return archived;
+  }
+
+  /** Aggregate pass/fail/coverage insight for a batch, build or work item. */
+  async testReport(filter: TestReportFilter = {}): Promise<TestReport> {
+    const includeArchived = filter.includeArchived !== false;
+    const runFilter: TestRunFilter = {
+      batch: filter.batch,
+      build: filter.build,
+      workItem: filter.workItem,
+      since: filter.since,
+      until: filter.until,
+      includeArchived,
+    };
+    const runs = await this.listTestRuns(runFilter);
+    const cases = (await this.listTestCases({ workItem: filter.workItem }, { withLastRun: false })).filter(
+      (c) => c.status === 'active',
+    );
+
+    const byCase = new Map<string, TestRun[]>();
+    for (const run of runs) {
+      const list = byCase.get(run.caseId) ?? [];
+      list.push(run);
+      byCase.set(run.caseId, list);
+    }
+
+    const totals = { cases: cases.length, runs: runs.length, pass: 0, fail: 0, blocked: 0, skipped: 0, notRun: 0 };
+    for (const run of runs) {
+      if (run.result === 'pass') totals.pass++;
+      else if (run.result === 'fail') totals.fail++;
+      else if (run.result === 'blocked') totals.blocked++;
+      else totals.skipped++;
+    }
+
+    const failures: TestReport['failures'] = [];
+    const notRunCases: TestReport['notRunCases'] = [];
+    const flaky: TestReport['flaky'] = [];
+    for (const c of cases) {
+      const list = byCase.get(c.id) ?? [];
+      if (!list.length) {
+        totals.notRun++;
+        notRunCases.push({ caseId: c.id, title: c.title });
+        continue;
+      }
+      const pass = list.filter((r) => r.result === 'pass').length;
+      const fail = list.filter((r) => r.result === 'fail').length;
+      if (pass > 0 && fail > 0) flaky.push({ caseId: c.id, title: c.title, pass, fail });
+      const latest = list.slice().sort(compareRunsDesc)[0];
+      if (latest.result === 'fail') {
+        failures.push({
+          caseId: c.id,
+          title: c.title,
+          runId: latest.id,
+          build: latest.build,
+          executedAt: latest.executedAt,
+        });
+      }
+    }
+
+    const items = await this.listWorkItems({ limit: 0 });
+    const coveredItems = new Set<string>();
+    for (const c of await this.listTestCases({}, { withLastRun: false })) {
+      if (c.workItem) coveredItems.add(c.workItem);
+    }
+    const withoutCases = items.filter((i) => !coveredItems.has(i.id)).map((i) => i.id);
+
+    const decided = totals.pass + totals.fail;
+    return {
+      scope: {
+        project: path.basename(this.root),
+        batch: filter.batch,
+        build: filter.build,
+        workItem: filter.workItem,
+        from: filter.since,
+        to: filter.until,
+      },
+      totals,
+      passRate: decided ? Math.round((totals.pass / decided) * 1000) / 10 : null,
+      coverage: {
+        itemsTotal: items.length,
+        itemsWithCases: items.length - withoutCases.length,
+        itemsWithoutCases: withoutCases.slice(0, 20),
+        itemsWithoutCasesTotal: withoutCases.length,
+      },
+      failures: failures.slice(0, 20),
+      notRunCases: notRunCases.slice(0, 50),
+      flaky,
+    };
+  }
+
+  /**
+   * Verification summary for a work item: how its active test cases last
+   * executed. Informational — the optional blocking gate lives in `Workspace`.
+   */
+  async verificationForWorkItem(id: string): Promise<WorkItemVerification> {
+    const cases = (await this.listTestCases({ workItem: id }, { withLastRun: false })).filter(
+      (c) => c.status === 'active',
+    );
+    const runs = await this.listTestRuns({ workItem: id });
+    const latest = new Map<string, TestRun>();
+    for (const run of runs.slice().sort(compareRunsDesc)) {
+      if (!latest.has(run.caseId)) latest.set(run.caseId, run);
+    }
+    const result: WorkItemVerification = { cases: cases.length, pass: 0, fail: 0, notRun: 0, failing: [], notRunCases: [] };
+    for (const c of cases) {
+      const run = latest.get(c.id);
+      if (!run) {
+        result.notRun++;
+        result.notRunCases.push(c.id);
+      } else if (run.result === 'pass') {
+        result.pass++;
+      } else if (run.result === 'fail') {
+        result.fail++;
+        result.failing.push(c.id);
+      }
+    }
+    return result;
+  }
+
+  // -------------------------------------------------- test run/archive helpers
+
+  /** Hot run ids, newest first. Ids are monotonic per project. */
+  private async hotRunIdsDesc(): Promise<string[]> {
+    const files = (await this.readDir(this.dirs.testruns)).filter((f) => /^TR-\d+\.json$/.test(f));
+    return files
+      .map((f) => parseInt(f.slice(3, -5), 10))
+      .sort((a, b) => b - a)
+      .map((n) => `TR-${n}`);
+  }
+
+  /** Bundle files newest-first (names sort chronologically). */
+  private async archiveBundleFiles(): Promise<string[]> {
+    const files = (await this.readDir(this.dirs.testrunsArchive)).filter((f) => f.endsWith('.jsonl'));
+    return files.sort().reverse();
+  }
+
+  /** Read every archived run (cold data). Empty until archiving has run. */
+  private async readArchivedRuns(): Promise<TestRun[]> {
+    const out: TestRun[] = [];
+    for (const file of await this.archiveBundleFiles()) {
+      const raw = await this.readFile(path.join(this.dirs.testrunsArchive, file));
+      if (raw === null) continue;
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          out.push(JSON.parse(line) as TestRun);
+        } catch {
+          // A corrupt line must never break queries; skip it.
+        }
+      }
+    }
+    return out;
+  }
+
+  /** Remove archived runs matching a predicate; returns how many were removed. */
+  private async removeArchivedRuns(predicate: (run: TestRun) => boolean): Promise<number> {
+    let removed = 0;
+    for (const file of await this.archiveBundleFiles()) {
+      const full = path.join(this.dirs.testrunsArchive, file);
+      const raw = await this.readFile(full);
+      if (raw === null) continue;
+      const kept: string[] = [];
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue;
+        let run: TestRun | null = null;
+        try {
+          run = JSON.parse(line) as TestRun;
+        } catch {
+          kept.push(line); // keep unparsable content rather than lose data
+          continue;
+        }
+        if (predicate(run)) removed++;
+        else kept.push(line);
+      }
+      if (!kept.length) await fs.rm(full, { force: true });
+      else await fs.writeFile(full, kept.join('\n') + '\n', 'utf8');
+    }
+    return removed;
+  }
+
+  /**
+   * Latest run + (optional) hot run count per case. Scans hot runs newest-first
+   * and stops early once every requested case is resolved.
+   */
+  private async collectRunStats(
+    caseIds: Set<string>,
+    opts: { includeArchived: boolean; countAll: boolean },
+  ): Promise<Map<string, { last: TestRun | null; count: number | null }>> {
+    const stats = new Map<string, { last: TestRun | null; count: number | null }>();
+    if (!caseIds.size) return stats;
+    for (const id of caseIds) stats.set(id, { last: null, count: opts.countAll ? 0 : null });
+
+    for (const runId of await this.hotRunIdsDesc()) {
+      const run = await this.getTestRun(runId);
+      if (!run || !caseIds.has(run.caseId)) continue;
+      const st = stats.get(run.caseId)!;
+      if (!st.last) st.last = run;
+      if (st.count !== null) st.count++;
+      if (!opts.countAll && [...stats.values()].every((s) => s.last)) break;
+    }
+
+    const unresolved = [...stats.values()].some((s) => !s.last);
+    if (opts.includeArchived && unresolved) {
+      for (const file of await this.archiveBundleFiles()) {
+        const raw = await this.readFile(path.join(this.dirs.testrunsArchive, file));
+        if (raw === null) continue;
+        for (const line of raw.split('\n')) {
+          if (!line.trim()) continue;
+          let run: TestRun;
+          try {
+            run = JSON.parse(line) as TestRun;
+          } catch {
+            continue;
+          }
+          if (!caseIds.has(run.caseId)) continue;
+          const st = stats.get(run.caseId)!;
+          if (!st.last) st.last = run;
+        }
+        if ([...stats.values()].every((s) => s.last)) break;
+      }
+    }
+    return stats;
+  }
+
+  /** Bugs this case guards: explicit `bugs[]` links plus bugs that name the case. */
+  private async linkedBugsForCase(testCase: TestCase): Promise<Bug[]> {
+    const out = new Map<string, Bug>();
+    for (const id of testCase.bugs ?? []) {
+      const bug = await this.getBug(id);
+      if (bug) out.set(bug.id, bug);
+    }
+    for (const bug of await this.listBugs({ limit: 0 })) {
+      if (bug.testCase === testCase.id) out.set(bug.id, bug);
+    }
+    return [...out.values()];
   }
 
   // --------------------------------------------------------------------- docs
@@ -711,6 +1523,11 @@ export class Store {
       for (const s of arr) map[s.status] = (map[s.status] ?? 0) + 1;
       return map;
     };
+    // Test counts are derived from the hot directory only: the board chips must
+    // not pay for reading archived bundles.
+    const cases = await this.listTestCases({}, { withLastRun: true });
+    const tests: Record<string, number> = { pass: 0, fail: 0, blocked: 0, skipped: 0, notRun: 0 };
+    for (const c of cases) tests[c.lastResult ?? 'notRun'] = (tests[c.lastResult ?? 'notRun'] ?? 0) + 1;
     const recent = await this.recentActivity(limit);
     return {
       workItems: statusCounts(workItems),
@@ -718,6 +1535,9 @@ export class Store {
       docs: docs.length,
       totalWorkItems: workItems.length,
       totalBugs: bugs.length,
+      tests,
+      totalTestCases: cases.length,
+      totalTestRuns: (await this.hotRunIdsDesc()).length,
       recent,
     };
   }
@@ -731,8 +1551,16 @@ export class Store {
     const commits = await this.git.logAll(limit, '.');
     const out: BoardActivity[] = [];
     for (const c of commits) {
-      const kind = c.message.startsWith('bug:') ? 'bug' : c.message.startsWith('doc:') ? 'doc' : 'workitem';
-      const id = /\b((?:WI|BUG)-\d+)\b/.exec(c.message)?.[1] ?? '';
+      const kind: BoardActivity['kind'] = c.message.startsWith('bug:')
+        ? 'bug'
+        : c.message.startsWith('doc:')
+          ? 'doc'
+          : c.message.startsWith('testcase:')
+            ? 'testcase'
+            : c.message.startsWith('test:')
+              ? 'testrun'
+              : 'workitem';
+      const id = /\b((?:WI|BUG|TC|TR)-\d+)\b/.exec(c.message)?.[1] ?? '';
       out.push({ kind, id, action: c.message, author: c.author, at: c.date });
     }
     return out;
@@ -751,4 +1579,91 @@ function clip(s: string, n = 48): string {
   return c.length > n ? c.slice(0, n - 1) + '…' : c;
 }
 
-export { WORKITEM_TYPES, WORKITEM_STATUSES, PRIORITIES, BUG_SEVERITIES, BUG_STATUSES, DOC_TYPES };
+/** Input accepted by `Store.recordTestRun`. */
+export interface RecordTestRunInput {
+  /** Existing case id (`TC-N`). Either this or `caseTitle` is required. */
+  caseId?: string;
+  /** Case title; an active match is reused, otherwise a case is auto-created. */
+  caseTitle?: string;
+  result: TestResult;
+  actual?: string;
+  evidence?: string;
+  environment?: string;
+  build?: string;
+  batch?: string;
+  durationMs?: number | null;
+  executedAt?: string;
+  author?: string;
+  /** File a bug when the result is a failure (deduplicated per case). Core default: false. */
+  createBugOnFailure?: boolean;
+  /** Advance a `fixed` bug to `verified` on a passing run. Default false. */
+  verifyBugs?: boolean;
+  /** Auto-create the case when `caseTitle` matches nothing. Default true. */
+  autoCreateCase?: boolean;
+}
+
+/** Newest execution first: by `executedAt`, then by id (ids are monotonic). */
+function compareRunsDesc(a: TestRun, b: TestRun): number {
+  const byTime = b.executedAt.localeCompare(a.executedAt);
+  if (byTime !== 0) return byTime;
+  return b.id.localeCompare(a.id, undefined, { numeric: true });
+}
+
+function matchesTestCaseFilter(tc: TestCaseWithStatus, filter: TestCaseFilter): boolean {
+  if (filter.status) {
+    const wanted = Array.isArray(filter.status) ? filter.status : [filter.status];
+    if (!wanted.includes(tc.status)) return false;
+  }
+  if (filter.type) {
+    const wanted = Array.isArray(filter.type) ? filter.type : [filter.type];
+    if (!wanted.includes(tc.type)) return false;
+  }
+  if (filter.priority) {
+    const wanted = Array.isArray(filter.priority) ? filter.priority : [filter.priority];
+    if (!wanted.includes(tc.priority)) return false;
+  }
+  if (filter.workItem && tc.workItem !== filter.workItem) return false;
+  if (filter.bug && !(tc.bugs ?? []).includes(filter.bug)) return false;
+  if (typeof filter.automated === 'boolean' && tc.automated !== filter.automated) return false;
+  if (filter.lastResult) {
+    const actual = tc.lastResult ?? 'notRun';
+    if (actual !== filter.lastResult) return false;
+  }
+  if (filter.tags?.length && !filter.tags.every((t) => tc.tags?.includes(t))) return false;
+  if (filter.query) {
+    const q = filter.query.toLowerCase();
+    const haystack = [tc.title, tc.description, tc.preconditions, ...(tc.steps ?? []).flatMap((s) => [s.action, s.expected])]
+      .join(' ')
+      .toLowerCase();
+    if (!haystack.includes(q)) return false;
+  }
+  return true;
+}
+
+function matchesRunFilter(run: TestRun, filter: TestRunFilter): boolean {
+  if (filter.caseId && run.caseId !== filter.caseId) return false;
+  if (filter.result) {
+    const wanted = Array.isArray(filter.result) ? filter.result : [filter.result];
+    if (!wanted.includes(run.result)) return false;
+  }
+  if (filter.build && run.build !== filter.build) return false;
+  if (filter.batch && run.batch !== filter.batch) return false;
+  if (filter.environment && run.environment !== filter.environment) return false;
+  if (filter.workItem && run.workItem !== filter.workItem) return false;
+  if (filter.executedBy && run.executedBy !== filter.executedBy) return false;
+  if (filter.since && run.executedAt < filter.since) return false;
+  if (filter.until && run.executedAt > filter.until) return false;
+  return true;
+}
+
+export {
+  WORKITEM_TYPES,
+  WORKITEM_STATUSES,
+  PRIORITIES,
+  BUG_SEVERITIES,
+  BUG_STATUSES,
+  DOC_TYPES,
+  TESTCASE_TYPES,
+  TESTCASE_STATUSES,
+  TEST_RESULTS,
+};

@@ -5,12 +5,19 @@ import { Store } from './store.js';
 import { NOW } from './frontmatter.js';
 import { hashPassword, verifyPassword } from './auth.js';
 import {
+  ArchivePolicy,
+  DEFAULT_ARCHIVE_POLICY,
+  DEFAULT_TEST_POLICY,
   Project,
   ProjectSummary,
+  TestCase,
+  TestPolicy,
+  TestPolicyOverride,
   User,
   UserKind,
   UserRole,
   WorkItem,
+  WorkItemVerification,
 } from './types.js';
 
 export interface WorkspaceOptions {
@@ -24,6 +31,8 @@ export interface WorkspaceConfig {
   projects: string[]; // project keys, in creation order
   createdAt: string;
   enforcePermissions: boolean; // when true, writes require a non-viewer member
+  /** Workspace-wide default test policy; projects may override it. */
+  testPolicy?: TestPolicyOverride;
 }
 
 const DEFAULT_PROJECT_KEY = 'default';
@@ -88,7 +97,7 @@ export class Workspace {
     // Await each exists() — a Promise is truthy, so filter() with an async
     // predicate would never yield an empty list.
     const legacyDirs: string[] = [];
-    for (const d of ['workitems', 'bugs', 'docs']) {
+    for (const d of ['workitems', 'bugs', 'docs', 'testcases', 'testruns']) {
       if (await this.exists(path.join(this.root, d))) legacyDirs.push(d);
     }
     if (!legacyDirs.length) return;
@@ -478,16 +487,21 @@ export class Workspace {
   }
 
   /**
-   * Deleting a work item is a destructive action restricted to the item's
-   * creator or a workspace admin. Unlike the looser write gate, this rule is
-   * enforced regardless of `enforcePermissions`: a member can edit, but only the
-   * creator (or an admin) can remove the item.
+   * Deleting a record is a destructive action restricted to its creator or a
+   * workspace admin. Unlike the looser write gate, this rule is enforced
+   * regardless of `enforcePermissions`: a member can edit, but only the creator
+   * (or an admin) can remove the record.
    */
-  async assertCanDeleteWorkItem(projectKey: string, author: string | undefined, createdBy: string): Promise<void> {
+  async assertCanDeleteRecord(projectKey: string, author: string | undefined, createdBy: string): Promise<void> {
     const role = await this.roleOf(author);
     if (role === 'admin') return;
     if (author && author === createdBy) return;
     throw new Error(`only the creator (${createdBy}) or an admin can delete this item (current: ${author || '?'})`);
+  }
+
+  /** @deprecated kept as an alias of `assertCanDeleteRecord`. */
+  async assertCanDeleteWorkItem(projectKey: string, author: string | undefined, createdBy: string): Promise<void> {
+    return this.assertCanDeleteRecord(projectKey, author, createdBy);
   }
 
   /**
@@ -499,8 +513,127 @@ export class Workspace {
     const store = this.getStore(projectKey);
     const item = await store.getWorkItem(id);
     if (!item) throw new Error(`work item not found: ${id}`);
-    await this.assertCanDeleteWorkItem(projectKey, author, item.createdBy);
+    await this.assertCanDeleteRecord(projectKey, author, item.createdBy);
     return store.deleteWorkItem(id);
+  }
+
+  /** Delete a test case (creator-or-admin), cascading its runs only with `force`. */
+  async deleteTestCase(
+    projectKey: string,
+    id: string,
+    author?: string,
+    opts: { force?: boolean } = {},
+  ): Promise<{ deleted: TestCase; deletedRuns: number }> {
+    await this.assertProjectAccess(projectKey, author, { write: true });
+    const store = this.getStore(projectKey);
+    const testCase = await store.getTestCase(id);
+    if (!testCase) throw new Error(`test case not found: ${id}`);
+    await this.assertCanDeleteRecord(projectKey, author, testCase.createdBy);
+    return store.deleteTestCase(id, opts);
+  }
+
+  // -------------------------------------------------------------- test policy
+
+  /** Effective test policy for a project (project overrides workspace defaults). */
+  async getTestPolicy(projectKey?: string): Promise<TestPolicy> {
+    const cfg = await this.loadConfig();
+    const wsPolicy = cfg.testPolicy ?? {};
+    const project = projectKey ? await this.getProject(projectKey) : null;
+    const projPolicy = project?.testPolicy ?? {};
+    return {
+      requirePassingOnComplete:
+        projPolicy.requirePassingOnComplete ??
+        wsPolicy.requirePassingOnComplete ??
+        DEFAULT_TEST_POLICY.requirePassingOnComplete,
+      allowForce: projPolicy.allowForce ?? wsPolicy.allowForce ?? DEFAULT_TEST_POLICY.allowForce,
+      archive: {
+        ...DEFAULT_ARCHIVE_POLICY,
+        ...(wsPolicy.archive ?? {}),
+        ...(projPolicy.archive ?? {}),
+      },
+    };
+  }
+
+  /**
+   * Update the test policy. Workspace-wide by default; pass `project` to write a
+   * project-level override.
+   */
+  async setTestPolicy(
+    patch: TestPolicyOverride,
+    opts: { project?: string } = {},
+  ): Promise<TestPolicy> {
+    if (opts.project) {
+      const project = await this.getProject(opts.project);
+      if (!project) throw new Error(`project not found: ${opts.project}`);
+      const current = project.testPolicy ?? {};
+      const merged = this.mergeTestPolicy(current, patch);
+      await this.writeJson(path.join(this.projectDir(opts.project), 'project.json'), {
+        ...project,
+        testPolicy: merged,
+        updatedAt: NOW(),
+      });
+      await this.commitMeta(`project: test policy ${opts.project}`);
+    } else {
+      const cfg = await this.loadConfig();
+      cfg.testPolicy = this.mergeTestPolicy(cfg.testPolicy ?? {}, patch);
+      await this.writeJson(path.join(this.root, 'workspace.json'), cfg);
+      await this.commitMeta('workspace: test policy');
+    }
+    return this.getTestPolicy(opts.project);
+  }
+
+  private mergeTestPolicy(current: TestPolicyOverride, patch: TestPolicyOverride): TestPolicyOverride {
+    const archive: Partial<ArchivePolicy> = { ...(current.archive ?? {}), ...(patch.archive ?? {}) };
+    return {
+      ...current,
+      ...patch,
+      archive: Object.keys(archive).length ? archive : undefined,
+    };
+  }
+
+  /**
+   * Complete a work item after applying the optional test gate. The gate is off
+   * by default: without it the caller gets a verification summary (and a note
+   * when tests are failing) but completion is never blocked.
+   */
+  async completeWorkItem(
+    projectKey: string,
+    id: string,
+    opts: { note?: string; closeLinkedBugs?: boolean; force?: boolean; author?: string } = {},
+  ): Promise<{ item: WorkItem; closedBugs: import('./types.js').Bug[]; verification: WorkItemVerification }> {
+    await this.assertProjectAccess(projectKey, opts.author, { write: true });
+    const store = this.getStore(projectKey);
+    const policy = await this.getTestPolicy(projectKey);
+    const verification = await store.verificationForWorkItem(id);
+    const unmet = verification.fail + verification.notRun;
+
+    if (policy.requirePassingOnComplete && unmet > 0) {
+      if (!opts.force) {
+        const detail = [
+          verification.fail ? `${verification.fail} failing (${verification.failing.join(', ')})` : '',
+          verification.notRun ? `${verification.notRun} not run (${verification.notRunCases.join(', ')})` : '',
+        ]
+          .filter(Boolean)
+          .join(' and ');
+        const hint = policy.allowForce ? ' — pass force to complete anyway' : '';
+        throw new Error(`cannot complete ${id}: linked test cases are ${detail}${hint}`);
+      }
+      if (!policy.allowForce) {
+        throw new Error(`cannot complete ${id}: force is disabled by the project test policy`);
+      }
+    }
+
+    const forceNote =
+      opts.force && unmet > 0
+        ? `forced completion with ${verification.fail} failing / ${verification.notRun} not run test case(s)`
+        : undefined;
+    const note = [opts.note, forceNote].filter(Boolean).join(' — ') || undefined;
+    return store.completeWorkItem(id, {
+      note,
+      closeLinkedBugs: opts.closeLinkedBugs,
+      author: opts.author,
+      force: opts.force,
+    });
   }
 
   /** Per-project statistics for all projects (for admin dashboards). */
@@ -527,7 +660,7 @@ export class Workspace {
   }
 
   private async rootHasBoard(): Promise<boolean> {
-    for (const d of ['workitems', 'bugs', 'docs']) {
+    for (const d of ['workitems', 'bugs', 'docs', 'testcases', 'testruns']) {
       if (await this.exists(path.join(this.root, d))) return true;
     }
     return false;
