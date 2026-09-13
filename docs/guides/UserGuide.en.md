@@ -17,11 +17,12 @@ trail, diffs, conflict-safe parallel work, and real version history for free.
 | **Backlog / work items** | Record tasks manually or let an agent enter decomposed subtasks; claim an item; mark it done (status updates automatically). |
 | **Bugs** | Record a bug manually, or let an agent log a bug it discovered (with evidence). Completing the linked work item auto-closes the bug. |
 | **Documents** | Store design/decision/ADR documents with **version management**. Agents can create and update them; every update is a new git version. |
+| **Tests** | Keep **reusable test cases** (`TC-N`) and **immutable execution records** (`TR-N`). A failing run files a bug for you; a passing run advances the bugs the case guards — closing the loop work item → test case → execution → bug → verification. |
 
 It is exposed through **three interfaces** that all share the same store:
 
 1. **CLI** — `nexplan …` (humans, scripts).
-2. **MCP server** — `node dist/mcp/server.js` (agents; 26 `nexplan_*` tools).
+2. **MCP server** — `node dist/mcp/server.js` (agents; 36 `nexplan_*` tools).
 3. **Web dashboard** — `nexplan web` (humans; kanban board, bug tracker, doc viewer/history,
    projects/users admin panel). Humans authenticate with a password; anonymous visitors can
    only **read** open projects.
@@ -60,17 +61,24 @@ relocate it. Each project has its own backlog, bugs and docs.
   users/<id>.json       user registry
   projects/<key>/
     project.json        project meta (name, description, members)
+    .counters.json      id counters (ids are never reused after a delete)
     workitems/          WI-*.json       backlog tasks
     bugs/               BUG-*.json      bugs
     docs/               <slug>.md       documents (markdown + frontmatter)
+    testcases/          TC-*.json       test cases (reusable test intent)
+    testruns/           TR-*.json       execution records (one file per run)
+    testruns/archive/   <YYYY-MM>.jsonl archived (cold) runs, one JSON per line
 ```
+
+Execution records are **one file per run** (`testruns/TR-N.json`); older runs are moved
+automatically into monthly bundles under `testruns/archive/`.
 
 Every mutation runs `git add` + `git commit` (scoped to the project subtree), so
 `git log` is your full activity feed, and documents get real version history.
 
 ### Statuses, types and priorities
 
-- **Work item type**: `task`, `feature`, `refactor`, `chore`, `research`, `bug`, `docs`
+- **Work item type**: `task`, `feature`, `refactor`, `chore`, `research`, `test`, `bug`, `docs`
 - **Work item status**: `backlog` → `todo` → `in_progress` → `review` → `done` (plus `blocked`)
 - **Priority**: `P0` … `P3` (P0 highest)
 - **Bug severity**: `critical`, `major`, `minor`, `trivial`
@@ -146,6 +154,53 @@ nexplan done WI-3 --note "完成并验证"
 nexplan bug add "登录接口偶发 500" --severity major --evidence "500: internal error"
 nexplan bug update BUG-1 --status in_progress --assignee codex
 ```
+
+### Test cases & execution records
+
+A **test case** (`TC-N`) is a reusable test intent: preconditions, steps with expected
+results, type, priority, the work item it verifies, the bugs it guards, and an optional
+automation locator. A **test run** (`TR-N`) is an immutable record of one execution:
+result, actual result, evidence, environment, build, batch, duration, executor, timestamp.
+
+```bash
+nexplan test list [--status s] [--type t] [--priority p] [--work-item WI-1] [--bug BUG-1] [--tag t] [--automated] [--last-result pass|fail|blocked|skipped|notRun] [--query q] [--limit n] [--json]
+nexplan test add "<title>" [--type functional] [--priority P1] [--status draft|active|deprecated] [--precondition "..."] [--step "action|expected"]... [--work-item WI-1] [--bug BUG-2]... [--tag a,b] [--automated] [--test-file "test/x.test.ts::name"] [--json-input]
+nexplan test get <TC-1> [--history n]
+nexplan test update <TC-1> [--title] [--description] [--type] [--priority] [--status] [--precondition] [--work-item] [--bug] [--tag] [--automated] [--test-file]
+nexplan test rm <TC-1> [--force]
+nexplan test run <TC-1> --result pass|fail|blocked|skipped [--actual "..."] [--evidence "..."] [--env local] [--build v0.4.0] [--batch "v0.4.0 regression"] [--duration 1200] [--no-bug] [--verify] [--executed-at <iso>]
+nexplan test run --title "<new case title>" --result fail      # auto-creates the case
+nexplan test history [<TC-1>] [--result fail] [--build v] [--batch b] [--from <iso>] [--to <iso>] [--hot-only] [--limit n]
+nexplan test report [--batch b] [--build v] [--work-item WI-1] [--from] [--to] [--hot-only] [--format text|md]
+nexplan test run --json-input < runs.json                     # batch: one commit for the whole suite
+nexplan test archive [--dry-run] [--before <iso>] [--keep n]      # force archiving now
+nexplan test archive <YYYY-MM> --restore                          # move a bundle back to the hot directory
+nexplan test archive --reindex                                    # rebuild archive/index.json
+nexplan test archive-status                                       # hot/archived counts, policy, bundles
+nexplan config set-test-policy <key> <value> [--project key]     # keys: requirePassingOnComplete, allowForce, archive.auto, archive.hotDays, archive.hotMax, archive.hysteresisRatio, archive.minIntervalHours, archive.minRunsPerArchive, archive.budgetMs, archive.bundle
+```
+
+- **A failure files a bug for you** — `test run … --result fail` opens a bug automatically
+  (disable per call with `--no-bug`). Filing is deduplicated: if the case already has an
+  `open`/`reopened` bug, the new evidence is appended to it instead of opening a duplicate.
+  The case's priority sets the bug's severity (`P0→critical`, `P1→major`, `P2→minor`,
+  `P3→trivial`).
+- **A pass advances the bugs the case guards** — `open`/`reopened` → `fixed`; with the
+  explicit `--verify` flag it also moves `fixed` → `verified`. A **fail** on a
+  `fixed`/`verified` bug moves it → `reopened` (a regression caught). `wontfix` bugs are
+  never touched, and every automatic transition is written into the bug's notes.
+- **`nexplan test report`** summarises whatever scope you give it (`--batch`, `--build`,
+  `--work-item`, or the whole project): pass rate, cases that never ran, failing cases,
+  flaky cases (the same case both passing and failing in scope), and work-item coverage
+  (how many work items have cases at all).
+- **The completion gate is off by default** — `nexplan done` always prints a verification
+  summary (pass/fail/not-run counts) and adds a note when linked cases are failing. Switch
+  it on with `nexplan config set-test-policy requirePassingOnComplete true` and completing
+  an item whose linked active cases are failing or never run is refused, with a hint to pass
+  `--force`; forcing the completion is recorded in the item's notes.
+- **Archived runs are merged in by default** — queries read hot and archived runs together,
+  so history stays complete; `--hot-only` restricts them to runs still on disk as individual
+  files.
 
 ### Documents
 
@@ -262,7 +317,7 @@ A cross-agent overview: [`docs/AGENTS.md`](AGENTS.md).
 > If an agent can’t load MCP servers, it can drive the exact same board by shelling
 > out to the `nexplan` CLI (Step 5).
 
-### The 28 tools
+### The 36 tools
 
 Most tools accept an optional `project` argument (defaults to `$NEXPLAN_PROJECT` or
 the workspace default).
@@ -284,6 +339,12 @@ the workspace default).
 | `nexplan_docs_comment` | Comment on a doc (project member/admin only) |
 | `nexplan_bug_add` | Report a bug you discovered (with evidence) |
 | `nexplan_bug_list` / `nexplan_bug_get` / `nexplan_bug_update` | Track bugs |
+| `nexplan_test_case_add` | Create reusable test cases (link them to a work item) |
+| `nexplan_test_case_list` / `nexplan_test_case_get` | Read test cases with latest result + run history |
+| `nexplan_test_case_update` / `nexplan_test_case_delete` | Edit / delete a test case |
+| `nexplan_test_run_record` | Record executions (one call may carry a whole suite); files a bug on failure, advances guarded bugs on pass |
+| `nexplan_test_run_list` | Read execution records (hot + archived) |
+| `nexplan_test_report` | Pass rate, not-run, failing and flaky cases |
 | `nexplan_status` | Board summary + recent activity |
 | `nexplan_agent_next` | Suggest the next item to pick up |
 | `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | Manage projects |
@@ -323,9 +384,17 @@ The dashboard has these tabs:
 - **Board** — a kanban by status (`待办 / 待开始 / 进行中 / 评审中 / 完成 / 阻塞`). Click a
   card to open detail: view description, notes, change status, **claim/start**,
   **mark done**, and add notes. Use the search box, priority and assignee filters, and
-  the **+ 新建待办** button to add items manually.
+  the **+ 新建待办** button to add items manually. A card whose work item has linked test
+  cases carries a **test badge** (e.g. `✅ 2/3` = 2 of 3 cases passing, `❌` when one is
+  failing) so you can see verification state right on the board.
 - **Bugs** — searchable bug list with severity/status badges; **+ 录入缺陷** to report
   one; inline “标记已修”; click a bug to edit severity/status.
+- **Tests** — the test-case list, each case with its **latest result**; filter by status,
+  last result and priority, or search. Select a case for detail: preconditions, the
+  **steps** table (action / expected), its linked work item and guarded bugs, and its
+  **execution history**. **New run** opens the **Record execution** dialog (result, actual
+  result, evidence, environment, build, batch, duration) and **📊 Report** opens the report
+  dialog (pass rate, not-run, failing and flaky cases). **+ New test case** creates one.
 - **Docs** — a document list on the left; select one to view its content (rendered
   from **Markdown**: headings, lists, tables, code blocks, images, links… and
   **Mermaid** ` ```mermaid ` diagrams rendered in the browser), metadata and
@@ -353,7 +422,11 @@ login sessions last 7 days (a signed `nexplan_session` cookie).
 3. **Document** — capture the *why* in a versioned doc (`nexplan_docs_create` / `update`).
 4. **Log bugs** — anything you hit during development goes to `nexplan_bug_add` with
    `evidence`; link the fixing item via `fixesBug`.
-5. **Finish** — `nexplan_backlog_complete` (sets `done`, records a note, auto-closes
+5. **Verify** — create a test case **once** with `nexplan_test_case_add` (linked to the
+   work item), then report **every** run with `nexplan_test_run_record` — one call can
+   carry a whole suite's runs as an array. Recording the real results (not just prose in a
+   note) is what makes the board's verification data trustworthy.
+6. **Finish** — `nexplan_backlog_complete` (sets `done`, records a note, auto-closes
    linked bugs).
 
 See [`docs/WORKFLOW.md`](WORKFLOW.md) for the full loop.

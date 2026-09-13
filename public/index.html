@@ -168,6 +168,7 @@
   <div class="tabs">
     <button class="tab active" data-tab="board" data-i18n="tab_board">Board</button>
     <button class="tab" data-tab="bugs" data-i18n="tab_bugs">Bugs</button>
+    <button class="tab" data-tab="tests" data-i18n="tab_tests">Tests</button>
     <button class="tab" data-tab="docs" data-i18n="tab_docs">Docs</button>
     <button class="tab" data-tab="admin" data-i18n="tab_admin">Admin</button>
   </div>
@@ -210,6 +211,28 @@
     <div class="panel" id="bug-list"></div>
   </section>
 
+  <!-- TESTS -->
+  <section id="view-tests" class="hidden">
+    <div class="toolbar">
+      <input id="tq" data-i18n-ph="search_case_ph" placeholder="Search test cases…" />
+      <select id="t-status"><option value="" data-i18n="all_statuses">All statuses</option>
+        <option value="active">active</option><option value="draft">draft</option><option value="deprecated">deprecated</option></select>
+      <select id="t-result"><option value="" data-i18n="all_results">All results</option>
+        <option value="pass">pass</option><option value="fail">fail</option><option value="blocked">blocked</option>
+        <option value="skipped">skipped</option><option value="notRun">notRun</option></select>
+      <select id="t-priority"><option value="" data-i18n="all_priorities">All priorities</option>
+        <option>P0</option><option>P1</option><option>P2</option><option>P3</option></select>
+      <div class="spacer"></div>
+      <button class="btn" id="t-report" data-i18n="test_report">📊 Report</button>
+      <button class="btn" id="t-batch" data-i18n="batch_record">✅ Record selected</button>
+      <button class="btn primary" id="new-case" data-i18n="new_case">+ New test case</button>
+    </div>
+    <div class="grid2">
+      <div class="panel" id="case-list"></div>
+      <div class="panel" id="case-view"><div class="empty" data-i18n="case_select_empty">Select a test case on the left</div></div>
+    </div>
+  </section>
+
   <!-- DOCS -->
   <section id="view-docs" class="hidden">
     <div class="toolbar">
@@ -229,6 +252,10 @@
         <button class="btn" id="perm-toggle">Permissions</button>
       </div>
       <div class="board" id="project-stats" style="margin-top:12px"></div>
+    </div>
+    <div class="panel" style="margin-bottom:16px">
+      <h2 data-i18n="archive_title">Test run archive</h2>
+      <div id="archive-panel" style="margin-top:8px"></div>
     </div>
     <div class="grid2">
       <div class="panel">
@@ -259,7 +286,7 @@ const esc = (s) => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':
 const I18N = {
   en: {
     title: 'NexPlan Project Management',
-    proj_label: 'Project', tab_board: 'Board', tab_bugs: 'Bugs', tab_docs: 'Docs', tab_admin: 'Admin',
+    proj_label: 'Project', tab_board: 'Board', tab_bugs: 'Bugs', tab_tests: 'Tests', tab_docs: 'Docs', tab_admin: 'Admin',
     refresh: 'Refresh', search_wi_ph: 'Search title/description…',
     all_priorities: 'All priorities', all_assignees: 'All assignees', new_item: '+ New work item',
     search_bug_ph: 'Search bugs…', all_severities: 'All severities', all_statuses: 'All statuses',
@@ -299,10 +326,41 @@ const I18N = {
     login_id: 'ID', login_password: 'Password', login_hint: 'Enter your login credentials',
     change_password_title: 'Change password', new_password: 'New password',
     password_required: 'Password required', form_password: 'Password (optional)',
+    // tests
+    search_case_ph: 'Search test cases…', all_results: 'All results', new_case: '+ New test case',
+    test_report: '📊 Report', case_select_empty: 'Select a test case on the left',
+    case_empty: 'No test cases', chips_tests: 'Test cases', chips_pass: 'Passing', chips_fail: 'Failing',
+    case_work_item: 'Verifies', case_guards: 'Guards', case_automated: 'Automated',
+    case_last: 'Last result', case_preconditions: 'Preconditions', case_steps: 'Steps',
+    case_step_action: 'Step', case_step_expected: 'Expected', case_history: 'Execution history',
+    case_no_history: 'No executions yet', case_new_run: 'Record execution', case_none: 'not run',
+    test_run_title: 'Record a test execution', test_result: 'Result', test_actual: 'Actual result',
+    test_evidence: 'Evidence (logs / stack trace)', test_env: 'Environment', test_build: 'Build',
+    test_batch: 'Batch', test_duration: 'Duration (ms)', test_auto_bug: 'File a bug when it fails',
+    test_verify_bugs: 'Mark guarded bugs verified on pass', record: 'Record',
+    report_title: 'Test report', report_batch: 'Batch (optional)', report_build: 'Build (optional)',
+    report_scope_hot: 'Hot data only', report_cases: 'Cases', report_runs: 'Runs',
+    report_pass_rate: 'Pass rate', report_coverage: 'Work item coverage',
+    report_failing: 'Failing cases', report_notrun: 'Not run', report_flaky: 'Flaky',
+    report_none_failing: 'Nothing failing', form_new_case: 'New test case',
+    form_precondition: 'Preconditions', form_steps: 'Steps (one per line: action | expected)',
+    form_work_item: 'Verifies work item (WI-N, optional)', form_status: 'Status',
+    form_test_file: 'Automation locator (optional)', delete_case: 'Delete case',
+    confirm_del_case: 'Delete test case {x}?', force_del_case: 'It has execution records — delete them too?',
+    case_saved: 'Saved', verifies_cases: 'cases', verified: 'verified',
+    w_tests: 'Test cases', w_no_tests: 'No test cases linked', form_guards: 'Guarded bugs (BUG-N, comma-separated)',
+    case_include_archived: 'Include archived runs', report_from: 'From', report_to: 'To',
+    stat_notrun: 'Not run', archive_title: 'Test run archive', archive_unavailable: 'Archive status unavailable',
+    archive_hot: 'Hot runs', archive_cold: 'Archived', archive_last: 'Last archive', archive_eval: 'Last check',
+    archive_policy: 'Policy', archive_now: 'Archive now', archive_dry: 'Dry run', archive_reindex: 'Reindex',
+    archive_restore: 'Restore', archive_no_bundles: 'No bundles yet', archive_nothing: 'Nothing to archive',
+    archive_reindexed: 'Index rebuilt',
+    batch_record: 'Record selected', batch_pick: 'Select for batch recording',
+    batch_pick_none: 'Select at least one case first',
   },
   zh: {
     title: 'NexPlan 项目管理',
-    proj_label: '项目', tab_board: '待办板', tab_bugs: '缺陷', tab_docs: '文档', tab_admin: '管理',
+    proj_label: '项目', tab_board: '待办板', tab_bugs: '缺陷', tab_tests: '测试', tab_docs: '文档', tab_admin: '管理',
     refresh: '刷新', search_wi_ph: '搜索标题/描述…',
     all_priorities: '全部优先级', all_assignees: '全部负责人', new_item: '+ 新建待办',
     search_bug_ph: '搜索缺陷…', all_severities: '全部级别', all_statuses: '全部状态',
@@ -342,6 +400,37 @@ const I18N = {
     login_id: 'ID', login_password: '密码', login_hint: '请输入登录凭据',
     change_password_title: '修改密码', new_password: '新密码',
     password_required: '请输入密码', form_password: '密码（可选）',
+    // tests
+    search_case_ph: '搜索测试用例…', all_results: '全部结果', new_case: '+ 新建用例',
+    test_report: '📊 测试报告', case_select_empty: '在左侧选择一个测试用例',
+    case_empty: '暂无测试用例', chips_tests: '测试用例', chips_pass: '通过', chips_fail: '失败',
+    case_work_item: '验证', case_guards: '守护缺陷', case_automated: '已自动化',
+    case_last: '最近结果', case_preconditions: '前置条件', case_steps: '步骤',
+    case_step_action: '操作', case_step_expected: '期望结果', case_history: '执行历史',
+    case_no_history: '暂无执行记录', case_new_run: '记录执行', case_none: '未执行',
+    test_run_title: '记录一次测试执行', test_result: '结果', test_actual: '实际结果',
+    test_evidence: '证据（日志 / 堆栈）', test_env: '环境', test_build: '构建',
+    test_batch: '批次', test_duration: '耗时（毫秒）', test_auto_bug: '失败时自动建缺陷',
+    test_verify_bugs: '通过时将守护缺陷标记为已验证', record: '记录',
+    report_title: '测试报告', report_batch: '批次（可选）', report_build: '构建（可选）',
+    report_scope_hot: '仅热数据', report_cases: '用例', report_runs: '执行次数',
+    report_pass_rate: '通过率', report_coverage: '工作项覆盖率',
+    report_failing: '失败用例', report_notrun: '未执行', report_flaky: '不稳定（flaky）',
+    report_none_failing: '没有失败的用例', form_new_case: '新建测试用例',
+    form_precondition: '前置条件', form_steps: '步骤（每行一条：操作 | 期望结果）',
+    form_work_item: '验证的工作项（WI-N，可选）', form_status: '状态',
+    form_test_file: '自动化定位（可选）', delete_case: '删除用例',
+    confirm_del_case: '删除测试用例 {x} ？', force_del_case: '它已有执行记录 —— 是否连同执行记录一起删除？',
+    case_saved: '已保存', verifies_cases: '个用例', verified: '已验证',
+    w_tests: '测试用例', w_no_tests: '未关联测试用例', form_guards: '守护缺陷（BUG-N，逗号分隔）',
+    case_include_archived: '包含归档执行记录', report_from: '起始日期', report_to: '结束日期',
+    stat_notrun: '未执行', archive_title: '执行记录归档', archive_unavailable: '无法获取归档状态',
+    archive_hot: '热数据', archive_cold: '已归档', archive_last: '最近归档', archive_eval: '最近检查',
+    archive_policy: '策略', archive_now: '立即归档', archive_dry: '试运行', archive_reindex: '重建索引',
+    archive_restore: '还原', archive_no_bundles: '暂无归档包', archive_nothing: '没有可归档的记录',
+    archive_reindexed: '索引已重建',
+    batch_record: '批量记录执行', batch_pick: '勾选以批量记录',
+    batch_pick_none: '请先勾选至少一条用例',
   }
 };
 
@@ -416,6 +505,9 @@ async function loadSummary() {
     `<span class="chip">${t('chips_wi')} <b>${wTotal}</b></span>` +
     keys.map(([k,v]) => `<span class="chip">${statusLabel(k)} <b>${v}</b></span>`).join('') +
     `<span class="chip">${t('chips_bugs')} <b>${bTotal}</b></span>` +
+    `<span class="chip">${t('chips_tests')} <b>${board.totalTestCases||0}</b></span>` +
+    (board.tests ? `<span class="chip">${t('chips_pass')} <b>${board.tests.pass||0}</b></span>` +
+      `<span class="chip">${t('chips_fail')} <b>${board.tests.fail||0}</b></span>` : '') +
     `<span class="chip">${t('chips_docs')} <b>${board.docs||0}</b></span>`;
 }
 
@@ -447,6 +539,7 @@ function cardHtml(i) {
     <div class="title">${esc(i.title)}</div>
     <div class="meta">
       <span class="badge pri-${esc(i.priority)}">${esc(i.priority)}</span>
+      ${caseStatsBadge(i.id)}
       ${i.assignee ? `<span class="assignee">@${esc(i.assignee)}</span>` : ''}
       ${(i.tags||[]).slice(0,2).map(t => `<span class="tag">#${esc(t)}</span>`).join('')}
       ${i.docLink ? `<a href="#" class="card-doc" data-doclink="${esc(i.docLink)}" title="${esc(i.docLink)}">🔗</a>` : ''}
@@ -465,6 +558,10 @@ function bindCards() {
 
 async function openItem(id) {
   const i = await api.get('/api/workitems/' + id + '?project=' + encodeURIComponent(project));
+  // Linked test cases: what verifies this item, and how it last went.
+  const linkedCases = await api
+    .get(`/api/testcases?workItem=${encodeURIComponent(id)}&project=${encodeURIComponent(project)}`)
+    .catch(() => []);
   const modal = $('#modal');
   const canDelete = !!(currentUser && (currentUser.role === 'admin' || currentUser.id === i.createdBy));
   modal.innerHTML = `
@@ -487,6 +584,17 @@ async function openItem(id) {
       <button class="btn sm" id="w-claim">${t('w_claim')}</button>
       <button class="btn sm primary" id="w-complete">${t('w_complete')}</button>
     </div>
+    <label>${t('w_tests')}</label>
+    <div id="w-tests">${linkedCases.length
+      ? linkedCases.map(c => `<div class="list-item" data-case="${esc(c.id)}" style="cursor:pointer">
+          <div class="row">
+            <span class="id" style="font-family:monospace;color:var(--accent)">${esc(c.id)}</span>
+            ${resultBadge(c.lastResult)}
+            <b>${esc(c.title)}</b>
+            ${c.lastRunAt ? `<span class="muted" style="font-size:12px">${esc(dt(c.lastRunAt))}${c.lastBuild ? ' · ' + esc(c.lastBuild) : ''}</span>` : ''}
+          </div>
+        </div>`).join('')
+      : `<div class="empty">${t('w_no_tests')}</div>`}</div>
     <label>${t('w_notes')}</label>
     <div id="w-notes">${(i.notes||[]).map(n => `<div class="note">${esc(n.body)} <span class="who">— ${esc(n.author)} ${esc(new Date(n.at).toLocaleString())}</span></div>`).join('') || `<div class="empty">${t('w_no_notes')}</div>`}</div>
     <div class="row" style="margin-top:10px">
@@ -531,6 +639,15 @@ async function openItem(id) {
     await refresh();
   };
   $('#w-close').onclick = closeModal;
+  // Jump straight from a work item to the case that verifies it.
+  document.querySelectorAll('#w-tests [data-case]').forEach(el => {
+    el.onclick = async () => {
+      const caseId = el.dataset.case;
+      closeModal();
+      await showTab('tests');
+      await openCase(caseId);
+    };
+  });
 }
 
 function closeModal() { $('#modal-bg').classList.remove('open'); }
@@ -606,8 +723,9 @@ function openDocModal(doc) {
 
 async function refresh() {
   await loadSummary();
-  if (!$('#view-board').classList.contains('hidden')) await loadBoard();
+  if (!$('#view-board').classList.contains('hidden')) { await loadCaseStatsByItem(); await loadBoard(); }
   if (!$('#view-bugs').classList.contains('hidden')) await loadBugs();
+  if (!$('#view-tests').classList.contains('hidden')) await loadTestCases();
   if (!$('#view-docs').classList.contains('hidden')) await loadDocsList();
   if (!$('#view-admin').classList.contains('hidden')) await loadAdmin();
 }
@@ -988,15 +1106,83 @@ async function loadAdmin() {
     const backlog = (s.totalWorkItems||0) - done - inprog;
     const openBugs = s.bugs?.open || 0;
     const memberCount = (p.members||[]).length;
+    const tests = s.tests || {};
+    const totalCases = s.totalTestCases || 0;
+    const passRate = (tests.pass || 0) + (tests.fail || 0) > 0
+      ? Math.round((tests.pass / ((tests.pass || 0) + (tests.fail || 0))) * 1000) / 10
+      : null;
     return `<div class="col" data-key="${esc(p.key)}" style="cursor:pointer">
       <h3>${esc(p.key)} <span class="count">${esc(p.name)}</span></h3>
       <div class="card"><div class="title">${t('stat_todo')} <b>${backlog}</b> · ${t('stat_inprog')} <b>${inprog}</b> · ${t('stat_done')} <b>${done}</b></div>
-        <div class="meta"><span class="badge sev-critical">${t('stat_bugs')} ${openBugs}</span><span class="muted">${t('stat_docs')} ${s.docs||0}</span><span class="muted">${t('stat_members')} ${memberCount}</span></div></div>
+        <div class="meta"><span class="badge sev-critical">${t('stat_bugs')} ${openBugs}</span><span class="muted">${t('stat_docs')} ${s.docs||0}</span><span class="muted">${t('stat_members')} ${memberCount}</span></div>
+        <div class="meta">
+          <span class="muted">${t('chips_tests')} ${totalCases}</span>
+          <span class="muted">${t('chips_pass')} ${tests.pass||0}</span>
+          <span class="muted">${t('chips_fail')} ${tests.fail||0}</span>
+          <span class="muted">${t('stat_notrun')} ${tests.notRun||0}</span>
+          <span class="muted">${t('report_pass_rate')} ${passRate === null ? '-' : passRate + '%'}</span>
+          <span class="muted">${t('report_runs')} ${s.totalTestRuns||0}</span>
+        </div></div>
     </div>`;
   }).join('') || `<div class="empty">${t('stat_empty')}</div>`;
   document.querySelectorAll('#project-stats .col').forEach(c => c.onclick = () => {
     project = c.dataset.key; $('#project-select').value = project; showTab('board');
   });
+
+  // Archive status for the current project: hot/cold counts, bundles, and the
+  // manual triggers (the automatic trigger rides on writes).
+  const archive = await api.get('/api/testarchive?project=' + encodeURIComponent(project)).catch(() => null);
+  const panel = $('#archive-panel');
+  if (!archive) {
+    panel.innerHTML = `<div class="empty">${t('archive_unavailable')}</div>`;
+  } else {
+    const pol = archive.policy || {};
+    panel.innerHTML = `
+      <div class="row">
+        <span class="chip">${t('archive_hot')} <b>${archive.hotRuns}</b></span>
+        <span class="chip">${t('archive_cold')} <b>${archive.archivedRuns}</b></span>
+        <span class="chip">${t('archive_last')} <b>${archive.lastArchiveAt ? esc(dt(archive.lastArchiveAt)) : '-'}</b></span>
+        <span class="chip">${t('archive_eval')} <b>${archive.lastEvalAt ? esc(dt(archive.lastEvalAt)) : '-'}</b></span>
+      </div>
+      <div class="muted" style="margin-top:6px;font-size:12px">
+        ${t('archive_policy')}: auto=${pol.auto} · hotDays=${pol.hotDays} · hotMax=${pol.hotMax} · bundle=${esc(pol.bundle || 'month')}
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn sm" id="arch-now">${t('archive_now')}</button>
+        <button class="btn sm" id="arch-dry">${t('archive_dry')}</button>
+        <button class="btn sm" id="arch-reindex">${t('archive_reindex')}</button>
+      </div>
+      <div id="arch-bundles" style="margin-top:10px">${(archive.bundles||[]).length
+        ? archive.bundles.map(b => `<div class="list-item">
+            <div class="row"><b>${esc(b.file)}</b><span class="muted">${b.runs} ${t('report_runs')}</span>
+              <span class="muted">${b.cases} ${t('verifies_cases')}</span>
+              <span class="muted">${(b.bytes/1024).toFixed(1)}KB</span>
+              <span class="muted">${esc(b.from||'-')} → ${esc(b.to||'-')}</span>
+              <button class="btn sm" data-arch-restore="${esc(b.file.replace(/\.jsonl$/,''))}">${t('archive_restore')}</button></div>
+          </div>`).join('')
+        : `<div class="empty">${t('archive_no_bundles')}</div>`}</div>`;
+    $('#arch-now').onclick = async () => {
+      const r = await api.send('/api/testarchive?project=' + encodeURIComponent(project), 'POST', {});
+      notify(r.archived ? `${t('archive_now')}: ${r.archived}` : t('archive_nothing'));
+      await loadAdmin();
+    };
+    $('#arch-dry').onclick = async () => {
+      const r = await api.send('/api/testarchive?project=' + encodeURIComponent(project), 'POST', { dryRun: true });
+      notify(r.archived
+        ? `${t('archive_dry')}: ${r.archived} → ${(r.bundles||[]).map(b => `${b.file}(${b.runs})`).join(', ')}`
+        : t('archive_nothing'));
+    };
+    $('#arch-reindex').onclick = async () => {
+      await api.send('/api/testarchive/reindex?project=' + encodeURIComponent(project), 'POST', {});
+      notify(t('archive_reindexed'));
+      await loadAdmin();
+    };
+    document.querySelectorAll('[data-arch-restore]').forEach(b => b.onclick = async () => {
+      const r = await api.send('/api/testarchive/restore?project=' + encodeURIComponent(project), 'POST', { bundle: b.dataset.archRestore });
+      notify(`${t('archive_restore')}: ${r.restored}`);
+      await loadAdmin();
+    });
+  }
 
   // Permission toggle button.
   const pt = $('#perm-toggle');
@@ -1037,6 +1223,346 @@ async function loadAdmin() {
   });
 }
 
+// ---------------- tests ----------------
+let caseStatsByItem = {};
+let openCaseId = null;
+/** Case history scope: false = merge archived runs (default), true = hot only. */
+let caseHotOnly = false;
+
+const dt = (iso) => (iso ? new Date(iso).toLocaleString() : '-');
+const resultBadge = (r) => {
+  const cls = r === 'pass' ? 'st done' : r === 'fail' ? 'st blocked' : r ? 'st review' : 'st backlog';
+  return `<span class="${cls}">${esc(r || t('case_none'))}</span>`;
+};
+
+/** Per-work-item case stats, fetched once per board render for card badges. */
+async function loadCaseStatsByItem() {
+  const cases = await api.get('/api/testcases?project=' + encodeURIComponent(project));
+  caseStatsByItem = {};
+  for (const c of cases) {
+    if (!c.workItem) continue;
+    const s = caseStatsByItem[c.workItem] || { total: 0, pass: 0, fail: 0, notRun: 0 };
+    s.total++;
+    if (c.lastResult === 'pass') s.pass++;
+    else if (c.lastResult === 'fail') s.fail++;
+    else if (!c.lastResult) s.notRun++;
+    caseStatsByItem[c.workItem] = s;
+  }
+}
+
+function caseStatsBadge(itemId) {
+  const s = caseStatsByItem[itemId];
+  if (!s || !s.total) return '';
+  const cls = s.fail ? 'sev-critical' : s.pass === s.total ? 'pri-P3' : 'pri-P2';
+  const icon = s.fail ? '❌' : s.pass === s.total ? '✅' : '◻';
+  return `<span class="badge ${cls}" title="${s.pass} pass / ${s.fail} fail / ${s.notRun} not run">${icon} ${s.pass}/${s.total}</span>`;
+}
+
+async function loadTestCases() {
+  const params = new URLSearchParams({ project });
+  const q = $('#tq').value.trim();
+  if (q) params.set('query', q);
+  if ($('#t-status').value) params.set('status', $('#t-status').value);
+  if ($('#t-result').value) params.set('lastResult', $('#t-result').value);
+  if ($('#t-priority').value) params.set('priority', $('#t-priority').value);
+  const cases = await api.get('/api/testcases?' + params.toString());
+  $('#case-list').innerHTML = cases.length
+    ? cases.map(caseRowHtml).join('')
+    : `<div class="empty">${t('case_empty')}</div>`;
+  document.querySelectorAll('#case-list .list-item').forEach(el => el.onclick = () => openCase(el.dataset.id));
+  // The picker must not open the case detail when toggled.
+  document.querySelectorAll('#case-list .case-pick').forEach(box => {
+    box.onclick = (e) => e.stopPropagation();
+    box.onchange = updateBatchButton;
+  });
+  updateBatchButton();
+  if (openCaseId && cases.some(c => c.id === openCaseId)) await openCase(openCaseId, false);
+}
+
+function caseRowHtml(c) {
+  return `<div class="list-item" data-id="${esc(c.id)}">
+    <div class="row">
+      <input type="checkbox" class="case-pick" data-pick="${esc(c.id)}" style="width:auto" title="${t('batch_pick')}" />
+      <span class="id" style="font-family:monospace;color:var(--accent)">${esc(c.id)}</span>
+      <span class="badge pri-${esc(c.priority)}">${esc(c.priority)}</span>
+      ${resultBadge(c.lastResult)}
+      <b>${esc(c.title)}</b>
+      ${c.workItem ? `<span class="assignee">${esc(c.workItem)}</span>` : ''}
+      ${c.automated ? `<span class="tag">auto</span>` : ''}
+    </div>
+    <div class="muted" style="font-size:12px">${c.lastRunAt ? esc(dt(c.lastRunAt)) + (c.lastBuild ? ' · ' + esc(c.lastBuild) : '') : ''}</div>
+  </div>`;
+}
+
+function runRowHtml(r) {
+  return `<div class="list-item">
+    <div class="row">
+      <span class="id" style="font-family:monospace;color:var(--accent)">${esc(r.id)}</span>
+      ${resultBadge(r.result)}
+      <b>${esc(r.executedBy)}</b>
+      <span class="muted">${esc(dt(r.executedAt))}</span>
+      ${r.build ? `<span class="tag">${esc(r.build)}</span>` : ''}
+      ${r.batch ? `<span class="tag">${esc(r.batch)}</span>` : ''}
+      ${r.bugIds && r.bugIds.length ? `<span class="badge sev-critical">${r.bugIds.map(esc).join(',')}</span>` : ''}
+    </div>
+    ${r.actual || r.evidence ? `<div class="muted" style="font-size:12px;white-space:pre-wrap">${esc(r.actual)}${r.actual && r.evidence ? '\n' : ''}${esc(r.evidence)}</div>` : ''}
+  </div>`;
+}
+
+async function openCase(id, scroll = true) {
+  openCaseId = id;
+  const data = await api.get(
+    `/api/testcases/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}&limit=50${caseHotOnly ? '&hotOnly=true' : ''}`,
+  );
+  const c = data.testCase;
+  const runs = data.runs || [];
+  $('#case-view').innerHTML = `
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">${esc(c.id)} · ${esc(c.title)}</h2>
+      ${resultBadge(runs[0] && runs[0].result)}
+    </div>
+    <div class="muted" style="margin:6px 0 10px">
+      ${esc(c.type)} · ${esc(c.priority)} · ${esc(c.status)}
+      ${c.workItem ? ` · ${t('case_work_item')} ${esc(c.workItem)}` : ''}
+      ${(c.bugs || []).length ? ` · ${t('case_guards')} ${c.bugs.map(esc).join(', ')}` : ''}
+      ${c.automated ? ` · ${t('case_automated')}` : ''}
+    </div>
+    ${c.description ? `<div>${esc(c.description)}</div>` : ''}
+    ${c.preconditions ? `<div style="margin-top:8px"><b>${t('case_preconditions')}</b><div>${esc(c.preconditions)}</div></div>` : ''}
+    ${(c.steps || []).length ? `<div style="margin-top:10px"><b>${t('case_steps')}</b>
+      <table class="admin"><tr><th>#</th><th>${t('case_step_action')}</th><th>${t('case_step_expected')}</th></tr>
+      ${c.steps.map((s, i) => `<tr><td>${i + 1}</td><td>${esc(s.action)}</td><td>${esc(s.expected)}</td></tr>`).join('')}</table></div>` : ''}
+    <div class="row" style="margin-top:14px">
+      <button class="btn primary sm" id="case-run">${t('case_new_run')}</button>
+      <button class="btn sm" id="case-edit">${t('save')}</button>
+      <button class="btn sm" id="case-del">${t('delete_case')}</button>
+    </div>
+    <h3 style="margin-top:16px">${t('case_history')}</h3>
+    <label style="display:flex;align-items:center;gap:6px;margin:0 0 6px">
+      <input type="checkbox" id="case-arch" ${caseHotOnly ? '' : 'checked'} style="width:auto" /> ${t('case_include_archived')}
+    </label>
+    ${runs.length ? runs.map(runRowHtml).join('') : `<div class="empty">${t('case_no_history')}</div>`}`;
+  $('#case-run').onclick = () => recordRunForm(c);
+  $('#case-edit').onclick = () => caseForm(c);
+  $('#case-del').onclick = () => deleteCase(c);
+  $('#case-arch').onchange = async (e) => {
+    caseHotOnly = !e.target.checked;
+    await openCase(id, false);
+  };
+  if (scroll) $('#case-view').scrollIntoView({ block: 'nearest' });
+}
+
+async function deleteCase(c) {
+  if (!confirm(fmt('confirm_del_case', { x: c.id }))) return;
+  try {
+    await api.send(`/api/testcases/${encodeURIComponent(c.id)}?project=${encodeURIComponent(project)}`, 'DELETE', {});
+  } catch (e) {
+    if (!String(e.message || '').includes('execution record')) return;
+    if (!confirm(t('force_del_case'))) return;
+    await api.send(`/api/testcases/${encodeURIComponent(c.id)}?project=${encodeURIComponent(project)}&force=1`, 'DELETE', {});
+  }
+  openCaseId = null;
+  $('#case-view').innerHTML = `<div class="empty">${t('case_select_empty')}</div>`;
+  await refresh();
+}
+
+function parseSteps(text) {
+  return text.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+    const i = l.indexOf('|');
+    return i === -1 ? { action: l, expected: '' } : { action: l.slice(0, i).trim(), expected: l.slice(i + 1).trim() };
+  });
+}
+
+function caseForm(existing) {
+  const c = existing || {};
+  const caseTypes = ['functional','regression','integration','e2e','performance','security','usability','other'];
+  modalShell(`
+    <h3>${existing ? esc(c.id) : t('form_new_case')}</h3>
+    <label>${t('form_title')}</label><input type="text" id="c-title" value="${esc(c.title || '')}" />
+    <div class="row">
+      <div style="flex:1"><label>${t('form_type')}</label><select id="c-type">${caseTypes.map(x => `<option ${c.type === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+      <div style="flex:1"><label>${t('form_priority')}</label><select id="c-pri">${['P0','P1','P2','P3'].map(p => `<option ${c.priority === p ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
+      <div style="flex:1"><label>${t('form_status')}</label><select id="c-status">${['draft','active','deprecated'].map(s => `<option ${(c.status || 'active') === s ? 'selected' : ''}>${s}</option>`).join('')}</select></div>
+    </div>
+    <label>${t('form_work_item')}</label><input type="text" id="c-wi" value="${esc(c.workItem || '')}" />
+    <label>${t('form_precondition')}</label><input type="text" id="c-pre" value="${esc(c.preconditions || '')}" />
+    <label>${t('form_steps')}</label><textarea id="c-steps">${esc((c.steps || []).map(s => s.action + ' | ' + s.expected).join('\n'))}</textarea>
+    <div class="row">
+      <div style="flex:1"><label>${t('form_tags')}</label><input type="text" id="c-tags" value="${esc((c.tags || []).join(','))}" /></div>
+      <div style="flex:1"><label>${t('form_test_file')}</label><input type="text" id="c-file" value="${esc(c.testFile || '')}" /></div>
+    </div>
+    <label>${t('form_guards')}</label>
+    <input type="text" id="c-bugs" value="${esc((c.bugs || []).join(','))}" placeholder="BUG-1,BUG-2" />
+    <div class="row" style="margin-top:12px"><button class="btn" id="c-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="c-save">${existing ? t('save') : t('create')}</button></div>`);
+  $('#c-cancel').onclick = closeModalX;
+  $('#c-save').onclick = async () => {
+    const title = $('#c-title').value.trim();
+    if (!title) return alert(t('alert_title'));
+    const payload = {
+      title,
+      type: $('#c-type').value,
+      priority: $('#c-pri').value,
+      status: $('#c-status').value,
+      workItem: $('#c-wi').value.trim() || null,
+      preconditions: $('#c-pre').value,
+      steps: parseSteps($('#c-steps').value),
+      tags: $('#c-tags').value.split(',').map(x => x.trim()).filter(Boolean),
+      testFile: $('#c-file').value.trim() || null,
+      bugs: $('#c-bugs').value.split(',').map(x => x.trim()).filter(Boolean),
+    };
+    const saved = existing
+      ? await api.send(`/api/testcases/${encodeURIComponent(existing.id)}?project=${encodeURIComponent(project)}`, 'PATCH', payload)
+      : (await api.send('/api/testcases?project=' + encodeURIComponent(project), 'POST', payload))[0];
+    closeModalX();
+    notify(t('case_saved'));
+    openCaseId = saved.id;
+    await refresh();
+  };
+}
+
+function recordRunForm(c) {
+  modalShell(`
+    <h3>${t('test_run_title')}</h3>
+    <div class="muted">${esc(c.id)} · ${esc(c.title)}</div>
+    <label>${t('test_result')}</label><select id="r-result">
+      ${['pass','fail','blocked','skipped'].map(r => `<option>${r}</option>`).join('')}</select>
+    <label>${t('test_actual')}</label><textarea id="r-actual"></textarea>
+    <label>${t('test_evidence')}</label><textarea id="r-evidence"></textarea>
+    <div class="row">
+      <div style="flex:1"><label>${t('test_env')}</label><input type="text" id="r-env" placeholder="local" /></div>
+      <div style="flex:1"><label>${t('test_build')}</label><input type="text" id="r-build" /></div>
+    </div>
+    <div class="row">
+      <div style="flex:1"><label>${t('test_batch')}</label><input type="text" id="r-batch" /></div>
+      <div style="flex:1"><label>${t('test_duration')}</label><input type="text" id="r-duration" /></div>
+    </div>
+    <label><input type="checkbox" id="r-bug" checked style="width:auto" /> ${t('test_auto_bug')}</label>
+    <label><input type="checkbox" id="r-verify" style="width:auto" /> ${t('test_verify_bugs')}</label>
+    <div class="row" style="margin-top:12px"><button class="btn" id="r-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="r-save">${t('record')}</button></div>`);
+  $('#r-cancel').onclick = closeModalX;
+  $('#r-save').onclick = async () => {
+    const res = await api.send('/api/testruns?project=' + encodeURIComponent(project), 'POST', {
+      caseId: c.id,
+      result: $('#r-result').value,
+      actual: $('#r-actual').value,
+      evidence: $('#r-evidence').value,
+      environment: $('#r-env').value,
+      build: $('#r-build').value,
+      batch: $('#r-batch').value,
+      durationMs: $('#r-duration').value ? Number($('#r-duration').value) : null,
+      createBugOnFailure: $('#r-bug').checked,
+      verifyBugs: $('#r-verify').checked,
+    });
+    closeModalX();
+    const created = (res.createdBugs || []).map(b => b.id).join(', ');
+    notify(created ? `+${created}` : t('case_saved'));
+    await refresh();
+    await openCase(c.id, false);
+  };
+}
+
+async function reportForm() {
+  modalShell(`
+    <h3>${t('report_title')}</h3>
+    <div class="row">
+      <div style="flex:1"><label>${t('report_batch')}</label><input type="text" id="rp-batch" /></div>
+      <div style="flex:1"><label>${t('report_build')}</label><input type="text" id="rp-build" /></div>
+    </div>
+    <div class="row">
+      <div style="flex:1"><label>${t('report_from')}</label><input type="date" id="rp-from" /></div>
+      <div style="flex:1"><label>${t('report_to')}</label><input type="date" id="rp-to" /></div>
+    </div>
+    <label><input type="checkbox" id="rp-hot" style="width:auto" /> ${t('report_scope_hot')}</label>
+    <div id="rp-out" style="margin-top:12px"></div>
+    <div class="row" style="margin-top:12px"><button class="btn" id="rp-cancel">${t('close')}</button>
+      <button class="btn primary" id="rp-run">${t('report_title')}</button></div>`);
+  $('#rp-cancel').onclick = closeModalX;
+  const run = async () => {
+    const params = new URLSearchParams({ project });
+    if ($('#rp-batch').value.trim()) params.set('batch', $('#rp-batch').value.trim());
+    if ($('#rp-build').value.trim()) params.set('build', $('#rp-build').value.trim());
+    // Date inputs are day-granular; widen to include the whole end day.
+    if ($('#rp-from').value) params.set('from', new Date($('#rp-from').value + 'T00:00:00').toISOString());
+    if ($('#rp-to').value) params.set('to', new Date($('#rp-to').value + 'T23:59:59').toISOString());
+    if ($('#rp-hot').checked) params.set('hotOnly', 'true');
+    const r = await api.get('/api/testreport?' + params.toString());
+    $('#rp-out').innerHTML = `
+      <div class="row"><span class="chip">${t('report_cases')} <b>${r.totals.cases}</b></span>
+        <span class="chip">${t('report_runs')} <b>${r.totals.runs}</b></span>
+        <span class="chip">${t('report_pass_rate')} <b>${r.passRate === null ? '-' : r.passRate + '%'}</b></span>
+        <span class="chip">${t('report_coverage')} <b>${r.coverage.itemsWithCases}/${r.coverage.itemsTotal}</b></span></div>
+      <div class="row" style="margin-top:8px">
+        <span class="chip">${t('chips_pass')} <b>${r.totals.pass}</b></span>
+        <span class="chip">${t('chips_fail')} <b>${r.totals.fail}</b></span>
+        <span class="chip">blocked <b>${r.totals.blocked}</b></span>
+        <span class="chip">${t('report_notrun')} <b>${r.totals.notRun}</b></span></div>
+      <h4>${t('report_failing')}</h4>
+      ${r.failures.length ? r.failures.map(f => `<div class="list-item">${esc(f.caseId)} · ${esc(f.title)} <span class="muted">${esc(f.runId)}${f.build ? ' · ' + esc(f.build) : ''}</span></div>`).join('') : `<div class="empty">${t('report_none_failing')}</div>`}
+      <h4>${t('report_notrun')}</h4>
+      ${r.notRunCases.length ? r.notRunCases.map(n => `<div class="list-item">${esc(n.caseId)} · ${esc(n.title)}</div>`).join('') : `<div class="empty">-</div>`}
+      ${r.flaky.length ? `<h4>${t('report_flaky')}</h4>` + r.flaky.map(f => `<div class="list-item">${esc(f.caseId)} · ${esc(f.title)} <span class="muted">pass ${f.pass} / fail ${f.fail}</span></div>`).join('') : ''}`;
+  };
+  $('#rp-run').onclick = run;
+  await run();
+}
+
+function pickedCases() {
+  return [...document.querySelectorAll('#case-list .case-pick')].filter(b => b.checked).map(b => b.dataset.pick);
+}
+
+function updateBatchButton() {
+  const n = pickedCases().length;
+  const btn = $('#t-batch');
+  if (!btn) return;
+  btn.textContent = n ? `${t('batch_record')} (${n})` : t('batch_record');
+  btn.disabled = n === 0;
+  btn.style.opacity = n ? '' : '0.5';
+}
+
+/** Record one result for many cases at once (a whole manual regression pass). */
+function batchRecordForm() {
+  const ids = pickedCases();
+  if (!ids.length) return notify(t('batch_pick_none'));
+  modalShell(`
+    <h3>${t('batch_record')}</h3>
+    <div class="muted">${ids.join(', ')}</div>
+    <label>${t('test_result')}</label><select id="br-result">
+      ${['pass','fail','blocked','skipped'].map(r => `<option>${r}</option>`).join('')}</select>
+    <div class="row">
+      <div style="flex:1"><label>${t('test_env')}</label><input type="text" id="br-env" placeholder="local" /></div>
+      <div style="flex:1"><label>${t('test_build')}</label><input type="text" id="br-build" /></div>
+    </div>
+    <label>${t('test_batch')}</label><input type="text" id="br-batch" />
+    <label>${t('test_actual')}</label><textarea id="br-actual"></textarea>
+    <label>${t('test_evidence')}</label><textarea id="br-evidence"></textarea>
+    <label><input type="checkbox" id="br-bug" checked style="width:auto" /> ${t('test_auto_bug')}</label>
+    <label><input type="checkbox" id="br-verify" style="width:auto" /> ${t('test_verify_bugs')}</label>
+    <div class="row" style="margin-top:12px"><button class="btn" id="br-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="br-save">${t('record')}</button></div>`);
+  $('#br-cancel').onclick = closeModalX;
+  $('#br-save').onclick = async () => {
+    const run = {
+      result: $('#br-result').value,
+      environment: $('#br-env').value,
+      build: $('#br-build').value,
+      actual: $('#br-actual').value,
+      evidence: $('#br-evidence').value,
+    };
+    const res = await api.send('/api/testruns?project=' + encodeURIComponent(project), 'POST', {
+      runs: ids.map(caseId => ({ caseId, ...run })),
+      batch: $('#br-batch').value,
+      createBugOnFailure: $('#br-bug').checked,
+      verifyBugs: $('#br-verify').checked,
+    });
+    closeModalX();
+    const bugs = (res.createdBugs || []).map(b => b.id).join(', ');
+    notify(`${ids.length} × ${run.result}${bugs ? ` · +${bugs}` : ''}`);
+    await refresh();
+  };
+}
+
 // ---------------- new forms ----------------
 function modalShell(html) { const m = $('#modal'); m.innerHTML = html; $('.modal-bg').classList.add('open'); }
 function closeModalX() { $('.modal-bg').classList.remove('open'); }
@@ -1045,7 +1571,7 @@ function newItemForm() {
   modalShell(`
     <h3>${t('form_new_item')}</h3>
     <label>${t('form_title')}</label><input type="text" id="n-title" />
-    <label>${t('form_type')}</label><select id="n-type">${['task','feature','refactor','chore','research','docs'].map(t2=>`<option>${t2}</option>`).join('')}</select>
+    <label>${t('form_type')}</label><select id="n-type">${['task','feature','refactor','chore','research','test','docs'].map(t2=>`<option>${t2}</option>`).join('')}</select>
     <div class="row"><div style="flex:1"><label>${t('form_priority')}</label><select id="n-pri">${['P0','P1','P2','P3'].map(p=>`<option>${p}</option>`).join('')}</select></div>
       <div style="flex:1"><label>${t('form_tags')}</label><input type="text" id="n-tags" /></div></div>
     <label>${t('form_desc')}</label><textarea id="n-desc"></textarea>
@@ -1214,13 +1740,20 @@ function changePasswordForm() {
 // ---------------- wiring ----------------
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-  ['board','bugs','docs','admin'].forEach(v => $('#view-' + v).classList.toggle('hidden', name !== v));
+  ['board','bugs','tests','docs','admin'].forEach(v => $('#view-' + v).classList.toggle('hidden', name !== v));
   refresh();
 }
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
 $('#refresh').onclick = refresh;
 $('#new-item').onclick = newItemForm;
 $('#new-bug').onclick = newBugForm;
+$('#new-case').onclick = () => caseForm(null);
+$('#t-report').onclick = reportForm;
+$('#t-batch').onclick = batchRecordForm;
+$('#tq').oninput = debounce(loadTestCases, 300);
+$('#t-status').onchange = loadTestCases;
+$('#t-result').onchange = loadTestCases;
+$('#t-priority').onchange = loadTestCases;
 $('#new-doc').onclick = newDocForm;
 $('#new-project').onclick = newProjectForm;
 $('#new-user').onclick = newUserForm;

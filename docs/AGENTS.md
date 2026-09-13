@@ -50,7 +50,7 @@ workspace also auto-bootstraps a default `admin` (initial password `admin`, forc
 change on first login), so enabling strict mode
 (`nexplan config set-enforce-permissions true`) can never lock out management.
 
-## The 28 tools
+## The 36 tools
 
 Most tools accept an optional `project` argument (defaults to `NEXPLAN_PROJECT` or the
 workspace default).
@@ -72,8 +72,14 @@ workspace default).
 | `nexplan_docs_comment` | Comment on a doc (project member/admin only) |
 | `nexplan_bug_add` | Report a bug you discovered (with evidence) |
 | `nexplan_bug_list` / `nexplan_bug_get` / `nexplan_bug_update` | Track bugs |
+| `nexplan_test_case_add` | Create reusable test cases (link them to a work item) |
+| `nexplan_test_case_list` / `nexplan_test_case_get` | Read test cases with latest result + run history |
+| `nexplan_test_case_update` / `nexplan_test_case_delete` | Edit / delete a test case |
+| `nexplan_test_run_record` | Record executions (one call may carry a whole suite); files a bug on failure, advances guarded bugs on pass |
+| `nexplan_test_run_list` | Read execution records (hot + archived) + an `archive` summary |
+| `nexplan_test_report` | Pass rate, not-run, failing and flaky cases |
 | `nexplan_status` | Board summary + recent activity |
-| `nexplan_agent_next` | Suggest the next thing to pick up |
+| `nexplan_agent_next` | Suggest the next thing: severe bug → re-verify a fixed bug whose case still fails → fix a failing case → backlog |
 | `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | Manage projects |
 | `nexplan_user_list` / `nexplan_user_add` / `nexplan_user_update` | Manage users (roles) |
 

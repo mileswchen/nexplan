@@ -49,7 +49,10 @@ describe('MCP server tools', () => {
     expect(names).toContain('nexplan_agent_next');
     expect(names).toContain('nexplan_project_create');
     expect(names).toContain('nexplan_user_add');
-    expect(names.length).toBe(28);
+    expect(names).toContain('nexplan_test_case_add');
+    expect(names).toContain('nexplan_test_run_record');
+    expect(names).toContain('nexplan_test_report');
+    expect(names.length).toBe(36);
   });
 
   it('adds a backlog item and lists it', async () => {
@@ -198,5 +201,125 @@ describe('MCP server tools', () => {
     expect(noWrite.content[0].text).toMatch(/not a project member/);
     const noRead = await call('nexplan_backlog_list', { project: 'team', author: 'bob' });
     expect(noRead.isError).toBeTruthy();
+  });
+
+  it('adds test cases, records a batch of runs, and files one bug for the failure', async () => {
+    const cases = await call('nexplan_test_case_add', {
+      items: [
+        { title: 'Order: out-of-stock message', priority: 'P1', status: 'active', tags: ['orders'] },
+        { title: 'Order: happy path', status: 'active' },
+      ],
+      author: 'claude-code',
+    });
+    expect(cases.isError).toBeFalsy();
+    const created = (cases.structuredContent as any).created;
+    expect(created.map((c: any) => c.id)).toEqual(['TC-1', 'TC-2']);
+
+    const recorded = await call('nexplan_test_run_record', {
+      runs: [
+        { caseId: 'TC-1', result: 'fail', actual: 'returned 500', evidence: 'logs/order.log:42', build: 'v0.4.0' },
+        { caseId: 'TC-2', result: 'pass', build: 'v0.4.0' },
+      ],
+      batch: 'v0.4.0 regression',
+      author: 'claude-code',
+    });
+    expect(recorded.isError).toBeFalsy();
+    const body = recorded.structuredContent as any;
+    expect(body.count).toBe(2);
+    expect(body.runs.map((r: any) => r.id)).toEqual(['TR-1', 'TR-2']);
+    expect(body.runs.every((r: any) => r.batch === 'v0.4.0 regression')).toBe(true);
+    expect(body.createdBugs).toHaveLength(1);
+    expect(body.createdBugs[0].severity).toBe('major'); // P1 → major
+    expect(body.createdBugs[0].testCase).toBe('TC-1');
+
+    // Listing cases decorates them with their latest result.
+    const listed = await call('nexplan_test_case_list', { status: 'active' });
+    const byId = new Map((listed.structuredContent as any).items.map((c: any) => [c.id, c]));
+    expect((byId.get('TC-1') as any).lastResult).toBe('fail');
+    expect((byId.get('TC-2') as any).lastResult).toBe('pass');
+    // Latest-result filtering works on the decorated view.
+    const failing = await call('nexplan_test_case_list', { lastResult: 'fail' });
+    expect((failing.structuredContent as any).items.map((c: any) => c.id)).toEqual(['TC-1']);
+
+    // The passing run two runs later advances the bug to fixed.
+    const fixed = await call('nexplan_test_run_record', {
+      runs: [{ caseId: 'TC-1', result: 'pass', build: 'v0.4.0-rc2' }],
+      batch: 'v0.4.0 regression',
+      author: 'claude-code',
+    });
+    expect((fixed.structuredContent as any).updatedBugs.map((b: any) => b.status)).toEqual(['fixed']);
+
+    const history = await call('nexplan_test_run_list', { caseId: 'TC-1' });
+    expect((history.structuredContent as any).items).toHaveLength(2);
+
+    const report = await call('nexplan_test_report', { batch: 'v0.4.0 regression' });
+    const r = report.structuredContent as any;
+    expect(r.totals).toMatchObject({ cases: 2, runs: 3, pass: 2, fail: 1, notRun: 0 });
+    expect(r.passRate).toBeCloseTo(66.7, 1);
+  });
+
+  it('suggests test-driven work: re-verify a fixed bug whose case still fails, then fix a failing case', async () => {
+    // A work item with a guarded bug and a case that keeps failing.
+    const bug = await call('nexplan_bug_add', { title: 'Guarded defect', severity: 'minor', author: 'codex' });
+    const bugId = (bug.structuredContent as any).id;
+    const item = await call('nexplan_backlog_add', { items: [{ title: 'Fix guarded defect', priority: 'P2' }], author: 'codex' });
+    const itemId = (item.structuredContent as any).created[0].id;
+    await call('nexplan_test_case_add', {
+      items: [{ title: 'Guarded case', status: 'active', workItem: itemId, bugs: [bugId] }],
+      author: 'codex',
+    });
+    await call('nexplan_test_run_record', {
+      runs: [{ caseId: 'TC-1', result: 'fail', actual: 'still broken' }],
+      createBugOnFailure: false,
+      author: 'codex',
+    });
+
+    // With the bug still open, the next thing is to fix it through its work item.
+    const fix = await call('nexplan_agent_next', { author: 'codex' });
+    expect((fix.structuredContent as any).recommendation).toBe('workitem');
+    expect((fix.structuredContent as any).item.id).toBe(itemId);
+    expect((fix.structuredContent as any).reason).toMatch(/TC-1 is failing/);
+
+    // Someone marks the bug fixed while the case still fails → re-check the fix.
+    await call('nexplan_bug_update', { id: bugId, status: 'fixed', author: 'codex' });
+    const verify = await call('nexplan_agent_next', { author: 'codex' });
+    expect((verify.structuredContent as any).recommendation).toBe('test-verify');
+    expect((verify.structuredContent as any).testCase.id).toBe('TC-1');
+    expect((verify.structuredContent as any).reason).toMatch(/still fails while BUG-1 is fixed/);
+  });
+
+  it('reports a verification summary when completing an item with failing cases', async () => {
+    const item = await call('nexplan_backlog_add', { items: [{ title: 'Gated' }], author: 'codex' });
+    const itemId = (item.structuredContent as any).created[0].id;
+    await call('nexplan_test_case_add', {
+      items: [{ title: 'Gate case', status: 'active', workItem: itemId }],
+      author: 'codex',
+    });
+    await call('nexplan_test_run_record', {
+      runs: [{ caseId: 'TC-1', result: 'fail' }],
+      createBugOnFailure: false,
+      author: 'codex',
+    });
+
+    // Gate off (default): completes, and reports the verification summary.
+    const free = await call('nexplan_backlog_complete', { id: itemId, author: 'codex' });
+    expect(free.isError).toBeFalsy();
+    expect((free.structuredContent as any).verification).toMatchObject({ cases: 1, fail: 1 });
+  });
+
+  it('deletes a test case only for its creator, and only when forced past its runs', async () => {
+    await call('nexplan_test_case_add', { items: [{ title: 'Guarded' }], author: 'codex' });
+    await call('nexplan_test_run_record', { runs: [{ caseId: 'TC-1', result: 'pass' }], author: 'codex' });
+
+    const denied = await call('nexplan_test_case_delete', { id: 'TC-1', author: 'alice' });
+    expect(denied.isError).toBeTruthy();
+
+    const blocked = await call('nexplan_test_case_delete', { id: 'TC-1', author: 'codex' });
+    expect(blocked.isError).toBeTruthy();
+    expect(blocked.content[0].text).toMatch(/execution record/);
+
+    const forced = await call('nexplan_test_case_delete', { id: 'TC-1', author: 'codex', force: true });
+    expect(forced.isError).toBeFalsy();
+    expect((forced.structuredContent as any).deletedRuns).toBe(1);
   });
 });

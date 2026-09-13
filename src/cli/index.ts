@@ -5,14 +5,25 @@ import { fileURLToPath } from 'node:url';
 import { Store } from '../core/store.js';
 import { Workspace } from '../core/workspace.js';
 import { getBoardRoot } from '../core/paths.js';
-import { BugFilter, ListFilter } from '../core/types.js';
-import { formatBug, formatBugFull, formatDoc, formatWorkItem, formatWorkItemFull } from './format.js';
+import { BugFilter, ListFilter, TestCaseFilter, TestReportFilter, TestRunFilter } from '../core/types.js';
+import {
+  formatBug,
+  formatBugFull,
+  formatDoc,
+  formatTestCase,
+  formatTestCaseFull,
+  formatTestReport,
+  formatTestReportMarkdown,
+  formatTestRun,
+  formatWorkItem,
+  formatWorkItemFull,
+} from './format.js';
 
 const program = new Command();
 program
   .name('nexplan')
   .description('NexPlan — git-backed, multi-project project management hub for coding agents.')
-  .version('0.3.0')
+  .version('0.4.0')
   .option('--root <path>', 'Workspace dir (default: $NEXPLAN_BOARD or ./.nexplan)')
   .option('--project <key>', 'Project key (default: $NEXPLAN_PROJECT or the workspace default)')
   .option('--json', 'JSON output');
@@ -69,7 +80,7 @@ program
   .description('Add a work item to the backlog.')
   .argument('[title]', 'Title of the work item (or use --title).')
   .option('--title <title>', 'Title of the work item.')
-  .option('--type <type>', 'Type: task|feature|refactor|chore|research|bug|docs.')
+  .option('--type <type>', 'Type: task|feature|refactor|chore|research|test|bug|docs.')
   .option('--description <text>', 'Description.')
   .option('--priority <p>', 'Priority: P0..P3.')
   .option('--assignee <name>', 'Assignee (agent name or user).')
@@ -191,17 +202,26 @@ program
 program
   .command('done <id>')
   .alias('complete')
-  .description('Mark a work item done (auto-closes linked bugs).')
+  .description('Mark a work item done (auto-closes linked bugs; optional test gate).')
   .option('--note <text>', 'Completion note.')
   .option('--no-close-bugs', 'Do not auto-close linked bugs.')
-  .action(async (id: string, opts: Record<string, string>) => {
+  .option('--force', 'Complete even when linked test cases are failing or not run.')
+  .action(async (id: string, opts: Record<string, string | boolean>) => {
     const closeBugs = (opts as unknown as { closeBugs?: boolean }).closeBugs !== false;
-    const res = await (await store(true)).completeWorkItem(id, {
-      note: opts.note,
+    const ws = await workspace();
+    const key = await projectKey();
+    const res = await ws.completeWorkItem(key, id, {
+      note: opts.note as string,
       closeLinkedBugs: closeBugs,
+      force: Boolean(opts.force),
+      author: process.env.NEXPLAN_AGENT || 'user',
     });
     if (program.opts().json) return printJson(res);
     out(formatWorkItem(res.item) + '\n');
+    if (res.verification.cases) {
+      const v = res.verification;
+      out(`tests: pass ${v.pass} / fail ${v.fail} / notRun ${v.notRun}\n`);
+    }
     if (res.closedBugs.length) out('\nclosed bugs:\n' + res.closedBugs.map(formatBug).join('\n') + '\n');
   });
 
@@ -407,6 +427,353 @@ docs
     out(`commented on ${slug}: ${c.body}\n`);
   });
 
+// ---- test cases & runs --------------------------------------------------------
+
+const testCmd = program.command('test').description('Test cases and execution records.');
+
+testCmd
+  .command('list')
+  .alias('ls')
+  .description('List test cases (with their latest execution result).')
+  .option('--status <s>', 'draft|active|deprecated.')
+  .option('--type <t>', 'functional|regression|integration|e2e|performance|security|usability|other.')
+  .option('--priority <p>', 'P0..P3.')
+  .option('--work-item <id>', 'Only cases linked to this work item.')
+  .option('--bug <id>', 'Only cases guarding this bug.')
+  .option('--tag <t>', 'Filter by tag.')
+  .option('--automated', 'Only automated cases.')
+  .option('--last-result <r>', 'pass|fail|blocked|skipped|notRun.')
+  .option('--query <q>', 'Substring match on title/description/steps.')
+  .option('--limit <n>', 'Max results.')
+  .action(async (opts: Record<string, string | boolean>) => {
+    const cases = await (await store()).listTestCases(
+      {
+        status: opts.status as never,
+        type: opts.type as never,
+        priority: opts.priority as never,
+        workItem: opts.workItem as string,
+        bug: opts.bug as string,
+        tags: split(opts.tag as string),
+        automated: opts.automated ? true : undefined,
+        lastResult: opts.lastResult as never,
+        query: opts.query as string,
+        limit: opts.limit ? Number(opts.limit) : undefined,
+      } as TestCaseFilter,
+    );
+    if (program.opts().json) return printJson(cases);
+    if (!cases.length) return out('(no test cases)\n');
+    for (const tc of cases) out(formatTestCase(tc) + '\n');
+  });
+
+testCmd
+  .command('get <id>')
+  .description('Show a test case with its execution history.')
+  .option('--history <n>', 'How many recent runs to show.', '5')
+  .action(async (id: string, opts: Record<string, string>) => {
+    const s = await store();
+    const tc = await s.getTestCase(id);
+    if (!tc) throw new Error(`test case not found: ${id}`);
+    const history = await s.testCaseHistory(id, Number(opts.history ?? 5));
+    const decorated = {
+      ...tc,
+      lastResult: history[0]?.result ?? null,
+      lastRunAt: history[0]?.executedAt ?? null,
+      lastBuild: history[0]?.build ?? null,
+      runCount: history.length,
+    };
+    if (program.opts().json) return printJson({ case: tc, history });
+    out(formatTestCaseFull(decorated) + '\n');
+    if (history.length) {
+      out('\n  history:\n');
+      for (const run of history) out('    ' + formatTestRun(run) + '\n');
+    }
+  });
+
+testCmd
+  .command('add <title>')
+  .description('Create a test case.')
+  .option('--description <text>', 'Purpose / scope.')
+  .option('--type <t>', 'functional|regression|integration|e2e|performance|security|usability|other.')
+  .option('--priority <p>', 'P0..P3.')
+  .option('--status <s>', 'draft|active|deprecated.', 'active')
+  .option('--precondition <text>', 'Preconditions.')
+  .option('--step <step>', 'Repeatable step as "action|expected result".')
+  .option('--work-item <id>', 'Work item this case verifies.')
+  .option('--bug <id>', 'Bug this case guards (repeatable).')
+  .option('--tag <t>', 'Tag (repeatable).')
+  .option('--automated', 'Mark as automated.')
+  .option('--test-file <locator>', 'Automation locator, e.g. "test/store.test.ts::claims an item".')
+  .option('--json-input', 'Read one or more cases as a JSON array from stdin.')
+  .action(async (title: string, opts: Record<string, string | string[] | boolean>) => {
+    const s = await store(true);
+    const created = [];
+    if (opts.jsonInput) {
+      const parsed = JSON.parse(await readStdin());
+      for (const item of Array.isArray(parsed) ? parsed : [parsed]) created.push(await s.createTestCase(item));
+    } else {
+      created.push(
+        await s.createTestCase({
+          title,
+          description: opts.description as string,
+          type: opts.type as never,
+          priority: opts.priority as never,
+          status: (opts.status as never) ?? 'active',
+          preconditions: opts.precondition as string,
+          steps: asArray(opts.step).map(parseStep),
+          workItem: (opts.workItem as string) ?? null,
+          bugs: asArray(opts.bug),
+          tags: asArray(opts.tag),
+          automated: Boolean(opts.automated),
+          testFile: (opts.testFile as string) ?? null,
+        }),
+      );
+    }
+    if (program.opts().json) return printJson(created);
+    for (const tc of created) out(`created ${tc.id}\n`);
+  });
+
+testCmd
+  .command('update <id>')
+  .description('Update a test case.')
+  .option('--title <v>')
+  .option('--description <v>')
+  .option('--type <v>')
+  .option('--priority <v>')
+  .option('--status <v>', 'draft|active|deprecated.')
+  .option('--precondition <v>')
+  .option('--work-item <v>')
+  .option('--bug <v>', 'Replace guarded bugs (comma-separated).')
+  .option('--tag <v>', 'Replace tags (comma-separated).')
+  .option('--automated <true|false>')
+  .option('--test-file <v>')
+  .action(async (id: string, opts: Record<string, string>) => {
+    const patch: Record<string, unknown> = {};
+    if (opts.title !== undefined) patch.title = opts.title;
+    if (opts.description !== undefined) patch.description = opts.description;
+    if (opts.type !== undefined) patch.type = opts.type;
+    if (opts.priority !== undefined) patch.priority = opts.priority;
+    if (opts.status !== undefined) patch.status = opts.status;
+    if (opts.precondition !== undefined) patch.preconditions = opts.precondition;
+    if (opts.workItem !== undefined) patch.workItem = opts.workItem || null;
+    if (opts.bug !== undefined) patch.bugs = split(opts.bug);
+    if (opts.tag !== undefined) patch.tags = split(opts.tag);
+    if (opts.automated !== undefined) patch.automated = /^(true|1|yes)$/i.test(opts.automated);
+    if (opts.testFile !== undefined) patch.testFile = opts.testFile || null;
+    const tc = await (await store(true)).updateTestCase(id, patch as never);
+    if (program.opts().json) return printJson(tc);
+    out(`updated ${tc.id} (${tc.status})\n`);
+  });
+
+testCmd
+  .command('rm <id>')
+  .alias('delete')
+  .description('Delete a test case (creator or admin; --force also deletes its runs).')
+  .option('--force', 'Delete the case even when execution records exist.')
+  .action(async (id: string, opts: Record<string, boolean>) => {
+    const ws = await workspace();
+    const key = await projectKey();
+    const actor = process.env.NEXPLAN_AGENT || 'user';
+    const res = await ws.deleteTestCase(key, id, actor, { force: Boolean(opts.force) });
+    if (program.opts().json) return printJson(res);
+    out(`deleted test case ${res.deleted.id}${res.deletedRuns ? ` and ${res.deletedRuns} run(s)` : ''}\n`);
+  });
+
+testCmd
+  .command('run [id]')
+  .alias('exec')
+  .description('Record one test execution (a failure files a bug unless --no-bug).')
+  .option('--title <title>', 'Use (or auto-create) a case by title instead of an id.')
+  .option('--result <r>', 'pass|fail|blocked|skipped (required).')
+  .option('--actual <text>', 'Observed result.')
+  .option('--evidence <text>', 'Logs / stack trace / artifact path.')
+  .option('--env <name>', 'Environment, e.g. local|ci|staging.')
+  .option('--build <id>', 'Build / version / commit.')
+  .option('--batch <name>', 'Batch label, e.g. "v0.4.0 regression".')
+  .option('--duration <ms>', 'Duration in milliseconds.')
+  .option('--no-bug', 'Do not file a bug when the result is a failure.')
+  .option('--verify', 'Advance a fixed linked bug to verified on a pass.')
+  .option('--executed-at <iso>', 'Backdate the execution time.')
+  .option(
+    '--json-input',
+    'Read one or more runs from stdin as a JSON array (fields match the MCP test_run_record payload); ' +
+      'the whole batch is committed once.',
+  )
+  .action(async (id: string | undefined, opts: Record<string, string | boolean>) => {
+    if (opts.jsonInput) {
+      const parsed = JSON.parse(await readStdin()) as unknown;
+      const items = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray((parsed as { runs?: unknown[] })?.runs)
+          ? (parsed as { runs: unknown[] }).runs
+          : [parsed];
+      const results = await (await store(true)).recordTestRuns(
+        items.map((raw) => {
+          const run = raw as Record<string, unknown>;
+          return {
+            ...run,
+            batch: (run.batch as string) ?? (opts.batch as string) ?? run.batch,
+            environment: run.environment ?? (opts.env as string),
+            build: run.build ?? (opts.build as string),
+            createBugOnFailure: run.createBugOnFailure ?? opts.bug !== false,
+            verifyBugs: run.verifyBugs === true || Boolean(opts.verify),
+          } as never;
+        }),
+      );
+      if (program.opts().json) return printJson(results);
+      const counts = results.reduce<Record<string, number>>((acc, r) => {
+        acc[r.run.result] = (acc[r.run.result] ?? 0) + 1;
+        return acc;
+      }, {});
+      out(
+        `recorded ${results.length} run(s): ` +
+          Object.entries(counts).map(([k, v]) => `${k} ${v}`).join(', ') +
+          '\n',
+      );
+      for (const r of results) out(formatTestRun(r.run) + '\n');
+      for (const b of results.flatMap((r) => r.createdBugs)) out('  filed ' + formatBug(b) + '\n');
+      for (const b of results.flatMap((r) => r.updatedBugs)) out('  updated ' + formatBug(b) + '\n');
+      return;
+    }
+    const result = String(opts.result ?? '');
+    if (!['pass', 'fail', 'blocked', 'skipped'].includes(result)) {
+      throw new Error('--result must be one of pass|fail|blocked|skipped (or use --json-input)');
+    }
+    if (!id && !opts.title) throw new Error('provide a case id or --title');
+    const res = await (await store(true)).recordTestRun({
+      caseId: id,
+      caseTitle: opts.title as string,
+      result: result as never,
+      actual: opts.actual as string,
+      evidence: opts.evidence as string,
+      environment: opts.env as string,
+      build: opts.build as string,
+      batch: opts.batch as string,
+      durationMs: opts.duration ? Number(opts.duration) : null,
+      executedAt: opts.executedAt as string,
+      createBugOnFailure: opts.bug !== false,
+      verifyBugs: Boolean(opts.verify),
+    });
+    if (program.opts().json) return printJson(res);
+    out(formatTestRun(res.run) + '\n');
+    for (const b of res.createdBugs) out('  filed ' + formatBug(b) + '\n');
+    for (const b of res.updatedBugs) out('  updated ' + formatBug(b) + '\n');
+  });
+
+testCmd
+  .command('history [id]')
+  .description('List execution records (hot + archived merged by default).')
+  .option('--result <r>', 'pass|fail|blocked|skipped.')
+  .option('--build <id>')
+  .option('--batch <name>')
+  .option('--from <iso>', 'Only runs executed at/after this time.')
+  .option('--to <iso>', 'Only runs executed at/before this time.')
+  .option('--hot-only', 'Ignore archived (cold) runs.')
+  .option('--limit <n>', 'Max results.', '20')
+  .action(async (id: string | undefined, opts: Record<string, string | boolean>) => {
+    const s = await store();
+    const runs = await s.listTestRuns({
+      caseId: id,
+      result: opts.result as never,
+      build: opts.build as string,
+      batch: opts.batch as string,
+      since: opts.from as string,
+      until: opts.to as string,
+      includeArchived: !opts.hotOnly,
+      limit: Number(opts.limit ?? 20),
+    });
+    if (program.opts().json) return printJson(runs);
+    if (!runs.length) return out('(no test runs)\n');
+    for (const run of runs) out(formatTestRun(run) + '\n');
+  });
+
+testCmd
+  .command('report')
+  .description('Pass rate, not-run cases, failures and flaky detection.')
+  .option('--batch <name>')
+  .option('--build <id>')
+  .option('--work-item <id>')
+  .option('--from <iso>')
+  .option('--to <iso>')
+  .option('--hot-only', 'Ignore archived (cold) runs.')
+  .option('--format <fmt>', 'text | md  (md output can be piped into `nexplan docs new --body`).', 'text')
+  .action(async (opts: Record<string, string | boolean>) => {
+    const key = await projectKey();
+    const report = await (await store()).testReport({
+      batch: opts.batch as string,
+      build: opts.build as string,
+      workItem: opts.workItem as string,
+      since: opts.from as string,
+      until: opts.to as string,
+      includeArchived: !opts.hotOnly,
+    } as TestReportFilter);
+    if (program.opts().json) return printJson({ ...report, projectKey: key });
+    const format = String(opts.format ?? 'text').toLowerCase();
+    if (format === 'md' || format === 'markdown') return out(formatTestReportMarkdown(report, key));
+    if (format !== 'text') throw new Error('--format must be one of text|md');
+    out(formatTestReport(report) + '\n');
+  });
+
+testCmd
+  .command('archive [bundle]')
+  .description(
+    'Move old execution records into monthly bundles (cold storage). Runs automatically after a ' +
+      'write once a threshold is crossed; this command forces it now.',
+  )
+  .option('--dry-run', 'Only report what would be archived.')
+  .option('--before <iso>', 'Archive runs executed before this timestamp (overrides hotDays).')
+  .option('--keep <n>', 'Keep the newest N runs hot (overrides hotMax).')
+  .option('--restore', 'Restore a bundle (pass the bundle name, e.g. 2025-09) into the hot directory.')
+  .option('--reindex', 'Rebuild archive/index.json.')
+  .action(async (bundle: string | undefined, opts: Record<string, string | boolean>) => {
+    const s = await store(true);
+    if (opts.reindex) {
+      const index = await s.reindexArchive();
+      if (program.opts().json) return printJson(index);
+      return out(`archive index rebuilt (${((index.bundles as unknown[]) ?? []).length} bundle(s))\n`);
+    }
+    if (opts.restore) {
+      if (!bundle) throw new Error('pass the bundle name to restore, e.g. nexplan test archive 2025-09 --restore');
+      const res = await s.restoreArchive(bundle);
+      if (program.opts().json) return printJson(res);
+      return out(`restored ${res.restored} run(s) from ${res.file}\n`);
+    }
+    const res = await s.archiveRuns({
+      before: opts.before as string,
+      keep: opts.keep ? Number(opts.keep) : undefined,
+      dryRun: Boolean(opts.dryRun),
+    });
+    if (program.opts().json) return printJson(res);
+    if (!res.archived) return out(`nothing to archive${res.skipped ? ` (${res.skipped})` : ''}\n`);
+    out(
+      `${opts.dryRun ? 'would archive' : 'archived'} ${res.archived} run(s) into ` +
+        `${res.bundles.map((b) => `${b.file} (${b.runs})`).join(', ')}\n`,
+    );
+  });
+
+testCmd
+  .command('archive-status')
+  .description('Show hot/archived run counts, retention policy and bundles.')
+  .action(async () => {
+    const status = await (await store()).archiveStatus();
+    if (program.opts().json) return printJson(status);
+    out(`hot runs:      ${status.hotRuns}\n`);
+    out(`archived runs: ${status.archivedRuns}\n`);
+    out(`oldest hot:    ${status.oldestHotAt ?? '-'}\n`);
+    out(`last eval:     ${status.lastEvalAt ?? '-'}\n`);
+    out(`last archive:  ${status.lastArchiveAt ?? '-'}\n`);
+    out(
+      `policy:        auto=${status.policy.auto} hotDays=${status.policy.hotDays} hotMax=${status.policy.hotMax} ` +
+        `hysteresis=${status.policy.hysteresisRatio} bundle=${status.policy.bundle}\n`,
+    );
+    if (!status.bundles.length) return out('bundles:       (none)\n');
+    out('bundles:\n');
+    for (const b of status.bundles) {
+      out(
+        `  ${b.file}  ${b.runs} run(s)  ${b.cases} case(s)  ${(b.bytes / 1024).toFixed(1)}KB  ${b.from ?? '-'} → ${b.to ?? '-'}\n`,
+      );
+    }
+  });
+
 // ---- board -------------------------------------------------------------------
 
 program
@@ -553,6 +920,47 @@ configCmd
     out(`enforcePermissions=${bool}\n`);
   });
 
+configCmd
+  .command('set-test-policy <key> <value>')
+  .description(
+    'Set a test policy value. Keys: requirePassingOnComplete, allowForce, archive.auto, archive.hotDays, ' +
+      'archive.hotMax, archive.hysteresisRatio, archive.minIntervalHours, archive.minRunsPerArchive, ' +
+      'archive.budgetMs, archive.bundle. Add --project <key> to override per project.',
+  )
+  .action(async (key: string, value: string) => {
+    await requireAdmin();
+    const ws = await workspace();
+    const project = program.opts().project || process.env.NEXPLAN_PROJECT;
+    const bold = /^(true|1|yes)$/i.test(value);
+    const num = Number(value);
+
+    const archiveKeys = [
+      'archive.auto',
+      'archive.hotDays',
+      'archive.hotMax',
+      'archive.hysteresisRatio',
+      'archive.minIntervalHours',
+      'archive.minRunsPerArchive',
+      'archive.budgetMs',
+    ];
+    const patch: Record<string, unknown> = {};
+    if (key === 'requirePassingOnComplete') patch.requirePassingOnComplete = bold;
+    else if (key === 'allowForce') patch.allowForce = bold;
+    else if (key === 'archive.bundle') {
+      if (!/^(month|week)$/.test(value)) throw new Error('archive.bundle must be month|week');
+      patch.archive = { bundle: value };
+    } else if (archiveKeys.includes(key)) {
+      const field = key.slice('archive.'.length);
+      if (!Number.isFinite(num)) throw new Error(`${key} expects a number`);
+      patch.archive = { [field]: key === 'archive.auto' ? bold : num };
+    } else {
+      throw new Error(`unknown test policy key: ${key}`);
+    }
+    const effective = await ws.setTestPolicy(patch as never, { project });
+    if (program.opts().json) return printJson(effective);
+    out(`${key} → ${value}${project ? ` (project ${project})` : ' (workspace default)'}\n`);
+  });
+
 // ---- agent config broadcast ----------------------------------------------------
 
 const agentCmd = program.command('agent').description('Agent config helpers.');
@@ -608,6 +1016,19 @@ program.parseAsync(process.argv).catch((err) => {
 function split(value: string | undefined): string[] | undefined {
   if (value === undefined) return undefined;
   return value.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/** Commander collects repeated options into an array, but a single use stays a string. */
+function asArray(value: string | string[] | boolean | undefined): string[] {
+  if (value === undefined || typeof value === 'boolean') return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+/** Parse a `--step "action|expected"` pair. */
+function parseStep(raw: string): { action: string; expected: string } {
+  const idx = raw.indexOf('|');
+  if (idx === -1) return { action: raw.trim(), expected: '' };
+  return { action: raw.slice(0, idx).trim(), expected: raw.slice(idx + 1).trim() };
 }
 
 function formatDate(iso: string): string {

@@ -54,16 +54,49 @@ If a work item will fix a bug, link it with `fixesBug`:
 nexplan_backlog_add       { "items": [ { "title": "修复空指针", "fixesBug": ["BUG-1"] } ] }
 ```
 
-## 5. Finish and update the board
+## 5. Record what you tested
+
+When you finish a change, say **what you actually ran**. Record one execution per case —
+the whole suite in a single call:
+
+```
+nexplan_test_run_record {
+  "runs": [
+    { "caseId": "TC-1", "result": "pass", "build": "v0.4.0", "env": "ci" },
+    { "caseTitle": "Order: out-of-stock message", "result": "fail", "build": "v0.4.0",
+      "actual": "returned 500", "evidence": "logs/order.log:42" }
+  ],
+  "batch": "v0.4.0 regression",
+  "author": "claude-code"
+}
+```
+
+What happens automatically:
+
+- the failure **files a bug** (deduplicated: a second failure on the same case appends
+  evidence instead of opening a duplicate) — pass `createBugOnFailure: false` to skip;
+- a `pass` moves the bugs this case guards from `open`/`reopened` → `fixed`, and
+  `fixed` → `verified` when you pass `verifyBugs: true`;
+- a `fail` on a `fixed`/`verified` bug **reopens** it (regression caught);
+- `nexplan_test_report` then gives you the pass rate, the cases that never ran and the
+  flaky ones.
+
+Describe the test intent once with `nexplan_test_case_add` (link it with `workItem`),
+then reuse that case id for every later run.
+
+## 6. Finish and update the board
 
 ```
 nexplan_backlog_complete  { "id": "WI-3", "note": "完成并补测试" }
 ```
 
 `backlog_complete` sets the item to `done`, records a completion note, and **auto-closes
-any linked bugs** (→ `fixed`) unless you pass `closeLinkedBugs: false`.
+any linked bugs** (→ `fixed`) unless you pass `closeLinkedBugs: false`. It also returns a
+`verification` summary (how the linked test cases last executed). If the project turns on
+`requirePassingOnComplete`, completing with failing or never-run cases is refused unless
+you pass `force: true` (which is recorded in the item's notes).
 
-## 6. Communicate
+## 7. Communicate
 
 Use `nexplan_backlog_note` to leave progress comments that the humans (and other
 agents) can read in the dashboard.
@@ -72,6 +105,7 @@ agents) can read in the dashboard.
 
 - **Statuses**: `backlog → todo → in_progress → review → done` (plus `blocked`).
 - **Bug statuses**: `open → in_progress → fixed → verified` (plus `wontfix`, `reopened`).
+- **Test results**: `pass | fail | blocked | skipped`, written once and never edited.
 - **Author attribution**: every tool accepts `author`; set it to your agent name so the
   git history and dashboard show who did what.
 - **Board location**: set `NEXPLAN_BOARD` identically in every agent config so they all
