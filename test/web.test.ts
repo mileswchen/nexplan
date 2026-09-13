@@ -30,7 +30,10 @@ async function req(method: string, url: string, body?: unknown, withCookie = tru
 beforeAll(async () => {
   dir = await mkdtemp(path.join(tmpdir(), 'nexplan-web-'));
   server = await startWebServer({ port: 0, root: dir });
-  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+  // Wait for the bind, but never wait for an event that already fired: on a fast
+  // runner `listening` can be emitted before this line runs, which would hang the
+  // hook forever (the original reason this suite could fail only on CI).
+  if (!server.listening) await new Promise<void>((resolve) => server.once('listening', resolve));
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
   base = `http://127.0.0.1:${port}`;

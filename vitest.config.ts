@@ -29,5 +29,14 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['test/**/*.test.ts'],
+    // These tests do real I/O: every board write is a git commit, the web suite
+    // binds a real socket and the CLI suite spawns the actual CLI. That makes
+    // them an order of magnitude slower on a 2-core CI runner than on a laptop,
+    // where the slowest non-explicit test already takes ~1.6s — close enough to
+    // vitest's 5s default that a busy runner turns it into a flaky failure
+    // (observed once on main while the identical tree passed 8 minutes earlier).
+    // Generous, still bounded: a genuine hang is reported in 30s, not never.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });
