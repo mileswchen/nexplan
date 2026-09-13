@@ -119,8 +119,9 @@ env:     { NEXPLAN_BOARD: "...", NEXPLAN_PROJECT: "<key>", NEXPLAN_AGENT: "<agen
 | `nexplan test rm <TC-1> [--force]` | 删除用例（有执行记录时需 `--force`） |
 | `nexplan test run <TC-1> --result fail --actual "..." [--evidence "..."] [--build v1] [--batch 回归] [--no-bug] [--verify]` | 记录一次执行 |
 | `nexplan test run --title "<新用例>" --result pass` | 未建用例时自动建 |
+| `nexplan test run --json-input < runs.json` | 批量上报（整套一次提交） |
 | `nexplan test history [<TC-1>] [--result fail] [--batch b] [--from d] [--to d] [--hot-only]` | 执行记录（默认含归档） |
-| `nexplan test report [--batch b] [--build v] [--work-item WI-1]` | 通过率 / 未执行 / 失败 / flaky |
+| `nexplan test report [--batch b] [--build v] [--work-item WI-1] [--from d] [--to d] [--format text\|md]` | 通过率 / 未执行 / 失败 / flaky（md 可直接 `docs new --body`） |
 | `nexplan config set-test-policy requirePassingOnComplete true` | 开启「用例全通过才能完成工作项」门禁 |
 | `nexplan config set-test-policy archive.hotMax 5000` | 归档阈值（热数据条数上限） |
 | `nexplan test archive [--dry-run] [--before d] [--keep n]` | 立即归档（写入后也会自动触发） |
@@ -134,7 +135,7 @@ env:     { NEXPLAN_BOARD: "...", NEXPLAN_PROJECT: "<key>", NEXPLAN_AGENT: "<agen
 ## 状态枚举 / Enums
 
 - 工作项：`backlog todo in_progress review done blocked`
-- 类型：`task feature refactor chore research bug docs`
+- 类型：`task feature refactor chore research test bug docs`
 - 优先级：`P0 P1 P2 P3`
 - 缺陷级别：`critical major minor trivial`
 - 缺陷状态：`open in_progress fixed verified wontfix reopened`

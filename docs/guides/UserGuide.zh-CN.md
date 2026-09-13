@@ -75,7 +75,7 @@ node dist/cli/index.js status
 
 ### 状态、类型与优先级
 
-- **工作项类型**：`task`、`feature`、`refactor`、`chore`、`research`、`bug`、`docs`
+- **工作项类型**：`task`、`feature`、`refactor`、`chore`、`research`、`test`、`bug`、`docs`
 - **工作项状态**：`backlog` → `todo` → `in_progress` → `review` → `done`（另有 `blocked`）
 - **优先级**：`P0` … `P3`（P0 最高）
 - **缺陷级别**：`critical`、`major`、`minor`、`trivial`
@@ -166,7 +166,8 @@ nexplan test rm <TC-1> [--force]
 nexplan test run <TC-1> --result pass|fail|blocked|skipped [--actual "..."] [--evidence "..."] [--env local] [--build v0.4.0] [--batch "v0.4.0 regression"] [--duration 1200] [--no-bug] [--verify] [--executed-at <iso>]
 nexplan test run --title "<新用例标题>" --result fail      # 自动创建该用例
 nexplan test history [<TC-1>] [--result fail] [--build v] [--batch b] [--from <iso>] [--to <iso>] [--hot-only] [--limit n]
-nexplan test report [--batch b] [--build v] [--work-item WI-1] [--from] [--to] [--hot-only]
+nexplan test report [--batch b] [--build v] [--work-item WI-1] [--from] [--to] [--hot-only] [--format text|md]
+nexplan test run --json-input < runs.json                     # 批量上报（整套一次提交）
 nexplan test archive [--dry-run] [--before <iso>] [--keep n]      # 立即执行归档
 nexplan test archive <YYYY-MM> --restore                          # 把归档包还原回热目录
 nexplan test archive --reindex                                    # 重建 archive/index.json

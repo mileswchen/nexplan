@@ -5,7 +5,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 // `as const` tuples keep zod's inferred types as literal unions, which match the
 // store's domain types exactly (a `[string, ...string[]]` cast would widen them).
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const;
-const ITEM_TYPES = ['task', 'feature', 'refactor', 'chore', 'research', 'bug', 'docs'] as const;
+const ITEM_TYPES = ['task', 'feature', 'refactor', 'chore', 'research', 'test', 'bug', 'docs'] as const;
 const ITEM_STATUSES = ['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked'] as const;
 const BUG_SEVERITIES = ['critical', 'major', 'minor', 'trivial'] as const;
 const BUG_STATUSES = ['open', 'in_progress', 'fixed', 'verified', 'wontfix', 'reopened'] as const;
@@ -467,15 +467,63 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     'nexplan_agent_next',
     {
       title: 'Suggest next item',
-      description: 'Suggest the next item for an agent: the top open critical/major bug if any, otherwise the highest-priority unowned backlog item.',
+      description:
+        'Suggest the next thing to pick up, in priority order: an open critical/major bug; then test-driven work ' +
+        '(a failing case whose guarded bug is already marked fixed/verified → re-check the fix; otherwise a failing ' +
+        'case → fix it, preferring its linked work item); then the highest-priority unowned backlog item; then any ' +
+        'open bug.',
       inputSchema: z.object({ assignee: z.string().optional(), project: projectOpt }),
     },
     async (args) => {
       const { store } = await projectStore(workspace, args);
       const assignee = args.assignee ?? 'agent';
+
+      // 1. A known-severe open bug outranks everything else.
       const bugs = await store.listBugs({ status: ['open', 'in_progress', 'reopened'] });
       const critical = bugs.filter((b) => b.severity === 'critical' || b.severity === 'major').sort(bySeverity);
       if (critical.length > 0) return ok({ recommendation: 'bug', bug: critical[0], reason: 'an open critical/major bug needs attention' });
+
+      // 2. Test-driven work: a failing case is a live signal that something is wrong.
+      const cases = await store.listTestCases({ status: 'active' }, { withLastRun: true });
+      const failing = cases.filter((c) => c.lastResult === 'fail');
+      if (failing.length > 0) {
+        const allBugs = await store.listBugs({ limit: 0 });
+        const guarded = new Map<string, typeof allBugs>();
+        for (const testCase of failing) {
+          const linked = new Map<string, (typeof allBugs)[number]>();
+          for (const id of testCase.bugs ?? []) {
+            const found = allBugs.find((b) => b.id === id);
+            if (found) linked.set(found.id, found);
+          }
+          for (const bug of allBugs) if (bug.testCase === testCase.id) linked.set(bug.id, bug);
+          guarded.set(testCase.id, [...linked.values()]);
+        }
+        // The fix was already reported fixed/verified yet the case still fails:
+        // that is a regression or a premature "fixed", so re-check it first.
+        const toVerify = failing.find((c) => (guarded.get(c.id) ?? []).some((b) => b.status === 'fixed' || b.status === 'verified'));
+        if (toVerify) {
+          const bug = (guarded.get(toVerify.id) ?? []).find((b) => b.status === 'fixed' || b.status === 'verified')!;
+          return ok({
+            recommendation: 'test-verify',
+            testCase: toVerify,
+            bug,
+            reason: `${toVerify.id} still fails while ${bug.id} is ${bug.status} — re-check that fix`,
+          });
+        }
+        const first = failing[0];
+        const item = first.workItem ? await store.getWorkItem(first.workItem) : null;
+        if (item) {
+          return ok({
+            recommendation: 'workitem',
+            item,
+            testCase: first,
+            reason: `test case ${first.id} is failing and verifies ${item.id}`,
+          });
+        }
+        return ok({ recommendation: 'testcase', testCase: first, reason: `test case ${first.id} is failing` });
+      }
+
+      // 3. Ordinary backlog work.
       const items = await store.listWorkItems({ status: ['backlog', 'todo'] });
       const candidates = items.filter((i) => i.status !== 'done' && i.status !== 'in_progress').sort((a, b) => prioRank(a.priority) - prioRank(b.priority));
       if (candidates.length > 0) return ok({ recommendation: 'workitem', item: candidates[0], reason: 'highest-priority open backlog item' });

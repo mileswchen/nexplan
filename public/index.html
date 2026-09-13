@@ -224,6 +224,7 @@
         <option>P0</option><option>P1</option><option>P2</option><option>P3</option></select>
       <div class="spacer"></div>
       <button class="btn" id="t-report" data-i18n="test_report">📊 Report</button>
+      <button class="btn" id="t-batch" data-i18n="batch_record">✅ Record selected</button>
       <button class="btn primary" id="new-case" data-i18n="new_case">+ New test case</button>
     </div>
     <div class="grid2">
@@ -354,6 +355,8 @@ const I18N = {
     archive_policy: 'Policy', archive_now: 'Archive now', archive_dry: 'Dry run', archive_reindex: 'Reindex',
     archive_restore: 'Restore', archive_no_bundles: 'No bundles yet', archive_nothing: 'Nothing to archive',
     archive_reindexed: 'Index rebuilt',
+    batch_record: 'Record selected', batch_pick: 'Select for batch recording',
+    batch_pick_none: 'Select at least one case first',
   },
   zh: {
     title: 'NexPlan 项目管理',
@@ -426,6 +429,8 @@ const I18N = {
     archive_policy: '策略', archive_now: '立即归档', archive_dry: '试运行', archive_reindex: '重建索引',
     archive_restore: '还原', archive_no_bundles: '暂无归档包', archive_nothing: '没有可归档的记录',
     archive_reindexed: '索引已重建',
+    batch_record: '批量记录执行', batch_pick: '勾选以批量记录',
+    batch_pick_none: '请先勾选至少一条用例',
   }
 };
 
@@ -1265,12 +1270,19 @@ async function loadTestCases() {
     ? cases.map(caseRowHtml).join('')
     : `<div class="empty">${t('case_empty')}</div>`;
   document.querySelectorAll('#case-list .list-item').forEach(el => el.onclick = () => openCase(el.dataset.id));
+  // The picker must not open the case detail when toggled.
+  document.querySelectorAll('#case-list .case-pick').forEach(box => {
+    box.onclick = (e) => e.stopPropagation();
+    box.onchange = updateBatchButton;
+  });
+  updateBatchButton();
   if (openCaseId && cases.some(c => c.id === openCaseId)) await openCase(openCaseId, false);
 }
 
 function caseRowHtml(c) {
   return `<div class="list-item" data-id="${esc(c.id)}">
     <div class="row">
+      <input type="checkbox" class="case-pick" data-pick="${esc(c.id)}" style="width:auto" title="${t('batch_pick')}" />
       <span class="id" style="font-family:monospace;color:var(--accent)">${esc(c.id)}</span>
       <span class="badge pri-${esc(c.priority)}">${esc(c.priority)}</span>
       ${resultBadge(c.lastResult)}
@@ -1496,6 +1508,61 @@ async function reportForm() {
   await run();
 }
 
+function pickedCases() {
+  return [...document.querySelectorAll('#case-list .case-pick')].filter(b => b.checked).map(b => b.dataset.pick);
+}
+
+function updateBatchButton() {
+  const n = pickedCases().length;
+  const btn = $('#t-batch');
+  if (!btn) return;
+  btn.textContent = n ? `${t('batch_record')} (${n})` : t('batch_record');
+  btn.disabled = n === 0;
+  btn.style.opacity = n ? '' : '0.5';
+}
+
+/** Record one result for many cases at once (a whole manual regression pass). */
+function batchRecordForm() {
+  const ids = pickedCases();
+  if (!ids.length) return notify(t('batch_pick_none'));
+  modalShell(`
+    <h3>${t('batch_record')}</h3>
+    <div class="muted">${ids.join(', ')}</div>
+    <label>${t('test_result')}</label><select id="br-result">
+      ${['pass','fail','blocked','skipped'].map(r => `<option>${r}</option>`).join('')}</select>
+    <div class="row">
+      <div style="flex:1"><label>${t('test_env')}</label><input type="text" id="br-env" placeholder="local" /></div>
+      <div style="flex:1"><label>${t('test_build')}</label><input type="text" id="br-build" /></div>
+    </div>
+    <label>${t('test_batch')}</label><input type="text" id="br-batch" />
+    <label>${t('test_actual')}</label><textarea id="br-actual"></textarea>
+    <label>${t('test_evidence')}</label><textarea id="br-evidence"></textarea>
+    <label><input type="checkbox" id="br-bug" checked style="width:auto" /> ${t('test_auto_bug')}</label>
+    <label><input type="checkbox" id="br-verify" style="width:auto" /> ${t('test_verify_bugs')}</label>
+    <div class="row" style="margin-top:12px"><button class="btn" id="br-cancel">${t('cancel')}</button>
+      <button class="btn primary" id="br-save">${t('record')}</button></div>`);
+  $('#br-cancel').onclick = closeModalX;
+  $('#br-save').onclick = async () => {
+    const run = {
+      result: $('#br-result').value,
+      environment: $('#br-env').value,
+      build: $('#br-build').value,
+      actual: $('#br-actual').value,
+      evidence: $('#br-evidence').value,
+    };
+    const res = await api.send('/api/testruns?project=' + encodeURIComponent(project), 'POST', {
+      runs: ids.map(caseId => ({ caseId, ...run })),
+      batch: $('#br-batch').value,
+      createBugOnFailure: $('#br-bug').checked,
+      verifyBugs: $('#br-verify').checked,
+    });
+    closeModalX();
+    const bugs = (res.createdBugs || []).map(b => b.id).join(', ');
+    notify(`${ids.length} × ${run.result}${bugs ? ` · +${bugs}` : ''}`);
+    await refresh();
+  };
+}
+
 // ---------------- new forms ----------------
 function modalShell(html) { const m = $('#modal'); m.innerHTML = html; $('.modal-bg').classList.add('open'); }
 function closeModalX() { $('.modal-bg').classList.remove('open'); }
@@ -1504,7 +1571,7 @@ function newItemForm() {
   modalShell(`
     <h3>${t('form_new_item')}</h3>
     <label>${t('form_title')}</label><input type="text" id="n-title" />
-    <label>${t('form_type')}</label><select id="n-type">${['task','feature','refactor','chore','research','docs'].map(t2=>`<option>${t2}</option>`).join('')}</select>
+    <label>${t('form_type')}</label><select id="n-type">${['task','feature','refactor','chore','research','test','docs'].map(t2=>`<option>${t2}</option>`).join('')}</select>
     <div class="row"><div style="flex:1"><label>${t('form_priority')}</label><select id="n-pri">${['P0','P1','P2','P3'].map(p=>`<option>${p}</option>`).join('')}</select></div>
       <div style="flex:1"><label>${t('form_tags')}</label><input type="text" id="n-tags" /></div></div>
     <label>${t('form_desc')}</label><textarea id="n-desc"></textarea>
@@ -1682,6 +1749,7 @@ $('#new-item').onclick = newItemForm;
 $('#new-bug').onclick = newBugForm;
 $('#new-case').onclick = () => caseForm(null);
 $('#t-report').onclick = reportForm;
+$('#t-batch').onclick = batchRecordForm;
 $('#tq').oninput = debounce(loadTestCases, 300);
 $('#t-status').onchange = loadTestCases;
 $('#t-result').onchange = loadTestCases;

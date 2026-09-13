@@ -73,10 +73,10 @@ Agent **永远不需要密码** —— Web 登录密码只给人类看板用户�
 | `nexplan_test_case_list` / `nexplan_test_case_get` | 读取用例（含最近结果与执行历史） |
 | `nexplan_test_case_update` / `nexplan_test_case_delete` | 修改 / 删除测试用例 |
 | `nexplan_test_run_record` | 记录测试执行（一次可上报整套）；失败自动开单，通过推进守护缺陷 |
-| `nexplan_test_run_list` | 读取执行记录（热数据 + 归档） |
+| `nexplan_test_run_list` | 读取执行记录（热数据 + 归档）+ `archive` 摘要 |
 | `nexplan_test_report` | 通过率、未执行、失败与 flaky 用例 |
 | `nexplan_status` | 看板汇总 + 近期活动 |
-| `nexplan_agent_next` | 建议下一个要处理的事项 |
+| `nexplan_agent_next` | 建议下一步：严重缺陷 → 用例仍失败但缺陷已 fixed（去复验）→ 有失败用例（去修）→ 待办项 |
 | `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | 项目管理 |
 | `nexplan_user_list` / `nexplan_user_add` / `nexplan_user_update` | 用户与角色管理 |
 

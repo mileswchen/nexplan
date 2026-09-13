@@ -17,7 +17,7 @@ trail, diffs, conflict-safe parallel work, and real version history for document
 | **Agent claims an item; status updates automatically when done** | `nexplan_backlog_claim` → `nexplan_backlog_complete` |
 | **Design & decision docs (versioned)** | MCP `nexplan_docs_create/update/history/diff`; every update creates a git version |
 | **Manually entered bugs + agent-discovered bugs** | `nexplan_bug_add/list/update`; auto-`fixed` when the linked item completes |
-| **Test cases + execution records** | `nexplan_test_case_add/list/update`, `nexplan_test_run_record` (batch), `nexplan_test_report`; a failing run files a bug, a passing run fixes/verifies the bugs it guards |
+| **Test cases + execution records** | `nexplan_test_case_add/list/update`, `nexplan_test_run_record` (batch), `nexplan_test_report`; a failing run files a bug, a passing run fixes/verifies the bugs it guards. `nexplan test report --format md` pipes straight into a versioned doc |
 | **Multi-project management** | One workspace holds multiple projects, each with its own backlog / bugs / docs; select via `--project` / `?project=` / MCP `project` parameter |
 | **Multi-user management** | User registry (humans + agents) with `admin / member / viewer` roles; `viewer` is read-only, can be strictly enforced |
 | **Access control** | Project member-roster check (projects with a roster are limited to members + admins); with strict mode enabled, only `admin` can manage |
@@ -127,8 +127,9 @@ nexplan test get <TC-1> [--history n] [--project key]
 nexplan test update <TC-1> [--status s] [--priority p] [--work-item WI-1] ... [--project key]
 nexplan test rm <TC-1> [--force] [--project key]
 nexplan test run <TC-1> --result pass|fail|blocked|skipped [--actual "..." ] [--evidence "..."] [--env ci] [--build v0.4.0] [--batch "regression"] [--no-bug] [--verify] [--project key]
+nexplan test run --json-input < runs.json      # batch: one commit for the whole suite
 nexplan test history [<TC-1>] [--result fail] [--build v] [--batch b] [--from d] [--to d] [--hot-only] [--project key]
-nexplan test report [--batch b] [--build v] [--work-item WI-1] [--hot-only] [--project key]
+nexplan test report [--batch b] [--build v] [--work-item WI-1] [--from d] [--to d] [--hot-only] [--format text|md] [--project key]
 nexplan test archive [--dry-run] [--before <iso>] [--keep n] | test archive <YYYY-MM> --restore | test archive --reindex | test archive-status   [--project key]
 nexplan config set-test-policy <key> <value> [--project key]   # e.g. requirePassingOnComplete true, archive.hotMax 5000
 nexplan docs list | docs show <slug> | docs new <title> | docs update <slug> | docs history <slug> | docs diff <slug> <shaA> <shaB> | docs comment <slug> <body>   [--project key]

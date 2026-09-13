@@ -93,7 +93,7 @@ type Bg = Omit<Bug, never> & { schema: 'bug' };
 type Tc = Omit<TestCase, never> & { schema: 'testcase' };
 type Tr = Omit<TestRun, never> & { schema: 'testrun' };
 
-const WORKITEM_TYPES: WorkItemType[] = ['task', 'feature', 'refactor', 'chore', 'research', 'bug', 'docs'];
+const WORKITEM_TYPES: WorkItemType[] = ['task', 'feature', 'refactor', 'chore', 'research', 'test', 'bug', 'docs'];
 const WORKITEM_STATUSES: WorkItemStatus[] = ['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked'];
 const PRIORITIES: Priority[] = ['P0', 'P1', 'P2', 'P3'];
 const BUG_SEVERITIES: BugSeverity[] = ['critical', 'major', 'minor', 'trivial'];

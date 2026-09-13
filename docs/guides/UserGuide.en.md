@@ -78,7 +78,7 @@ Every mutation runs `git add` + `git commit` (scoped to the project subtree), so
 
 ### Statuses, types and priorities
 
-- **Work item type**: `task`, `feature`, `refactor`, `chore`, `research`, `bug`, `docs`
+- **Work item type**: `task`, `feature`, `refactor`, `chore`, `research`, `test`, `bug`, `docs`
 - **Work item status**: `backlog` → `todo` → `in_progress` → `review` → `done` (plus `blocked`)
 - **Priority**: `P0` … `P3` (P0 highest)
 - **Bug severity**: `critical`, `major`, `minor`, `trivial`
@@ -171,7 +171,8 @@ nexplan test rm <TC-1> [--force]
 nexplan test run <TC-1> --result pass|fail|blocked|skipped [--actual "..."] [--evidence "..."] [--env local] [--build v0.4.0] [--batch "v0.4.0 regression"] [--duration 1200] [--no-bug] [--verify] [--executed-at <iso>]
 nexplan test run --title "<new case title>" --result fail      # auto-creates the case
 nexplan test history [<TC-1>] [--result fail] [--build v] [--batch b] [--from <iso>] [--to <iso>] [--hot-only] [--limit n]
-nexplan test report [--batch b] [--build v] [--work-item WI-1] [--from] [--to] [--hot-only]
+nexplan test report [--batch b] [--build v] [--work-item WI-1] [--from] [--to] [--hot-only] [--format text|md]
+nexplan test run --json-input < runs.json                     # batch: one commit for the whole suite
 nexplan test archive [--dry-run] [--before <iso>] [--keep n]      # force archiving now
 nexplan test archive <YYYY-MM> --restore                          # move a bundle back to the hot directory
 nexplan test archive --reindex                                    # rebuild archive/index.json

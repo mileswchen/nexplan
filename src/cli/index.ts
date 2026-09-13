@@ -13,6 +13,7 @@ import {
   formatTestCase,
   formatTestCaseFull,
   formatTestReport,
+  formatTestReportMarkdown,
   formatTestRun,
   formatWorkItem,
   formatWorkItemFull,
@@ -79,7 +80,7 @@ program
   .description('Add a work item to the backlog.')
   .argument('[title]', 'Title of the work item (or use --title).')
   .option('--title <title>', 'Title of the work item.')
-  .option('--type <type>', 'Type: task|feature|refactor|chore|research|bug|docs.')
+  .option('--type <type>', 'Type: task|feature|refactor|chore|research|test|bug|docs.')
   .option('--description <text>', 'Description.')
   .option('--priority <p>', 'Priority: P0..P3.')
   .option('--assignee <name>', 'Assignee (agent name or user).')
@@ -694,6 +695,7 @@ testCmd
   .option('--from <iso>')
   .option('--to <iso>')
   .option('--hot-only', 'Ignore archived (cold) runs.')
+  .option('--format <fmt>', 'text | md  (md output can be piped into `nexplan docs new --body`).', 'text')
   .action(async (opts: Record<string, string | boolean>) => {
     const key = await projectKey();
     const report = await (await store()).testReport({
@@ -705,6 +707,9 @@ testCmd
       includeArchived: !opts.hotOnly,
     } as TestReportFilter);
     if (program.opts().json) return printJson({ ...report, projectKey: key });
+    const format = String(opts.format ?? 'text').toLowerCase();
+    if (format === 'md' || format === 'markdown') return out(formatTestReportMarkdown(report, key));
+    if (format !== 'text') throw new Error('--format must be one of text|md');
     out(formatTestReport(report) + '\n');
   });
 

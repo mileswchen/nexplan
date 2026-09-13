@@ -638,22 +638,22 @@ export interface BoardSummary {
 
 **P1（已交付）**：全部归档规格（§13）——`archive.ts` 判定与月包整形、写入后 O(1) 门控、月包 JSONL、`--dry-run` / `--restore` / `--reindex`、CLI `test archive|archive-status`、三端查询参数（`--hot-only` / `--from` / `--to` / `includeArchived`）、`test/archive.test.ts` 19 个断言、文档。
 
-**P1 遗留缺口（设计写了、实现没做 —— 2026-09 审计结果）**
+**P1 遗留缺口（已修复）**
 
-| # | 缺口 | 影响 |
-|---|---|---|
-| A1 | **Web 归档 UI 完全未做**：`/api/testarchive*` 端点已就绪，但 `public/index.html` 里零调用 —— 缺 §13.9 要求的 Admin 归档状态面板（热集条数 / 最近评估与归档时间 / 月包列表与体积 / 「立即归档」/「重建索引」）、执行历史「包含归档」开关、报告面板 `from`/`to` 时间范围 | 人类在 GUI 里既看不到也管不了归档 |
-| A2 | **CLI 批量上报缺失**：MCP 有 `runs[]`、Web 支持数组，CLI `test run` 只能单条（无 `--json-input`） | 三端能力不对齐；CI/脚本一次上报整套要走 MCP |
-| A3 | **工作项详情弹窗未列出关联用例**（§5.4 第 5 项） | 从「任务」看不到它的验证状态，只能回 Tests 页翻 |
-| A4 | **Admin 页项目统计未含测试计数**（§5.4 第 6 项） | 只有顶部 chips 有汇总，Admin 面板看不到 |
-| A5 | **Web 用例编辑弹窗缺「守护缺陷」字段**（CLI `test update --bug`、MCP 都有） | Web 上无法把用例与缺陷绑定，R3 自动流转在 Web 侧用不上 |
+A1 Web 归档 UI（Admin 归档面板：热/归档条数、最近检查与归档时间、生效策略、月包列表 + 立即归档/试运行/重建索引/逐个还原；用例执行历史「包含归档」开关；报告面板 `from`/`to`）、A2 CLI `test run --json-input` 批量上报（一次提交）、A3 工作项详情弹窗列出关联用例与最近结果并可跳转、A4 Admin 项目统计加测试计数与通过率、A5 Web 用例编辑弹窗补「守护缺陷」字段 —— **全部交付**（提交 `ca0fff0`）。
 
-**P2（待做，不含已延期的导入）**
+**P2（已交付）**
 
-1. **`test report --format md`**：导出 Markdown 报告（通过率、失败清单、未执行、flaky、覆盖率缺口），可直接 `docs new --body` 落成版本化文档（「测试报告即文档」）。
-2. **`nexplan_agent_next` 纳入测试维度**：在推荐顺序里加「有失败用例但缺陷已 `fixed`」的回归验证项、以及「有失败用例的工作项」，让 Agent 的下一步包含测试驱动的修复/验证。
-3. **Web 批量记录执行界面**：多选用例 → 一次提交结果（人工跑一遍回归时批量录入），对齐 MCP/CLI 的批量能力。
-4. （可选）**`WorkItemType` 增加 `test` 类型**：影响 7 处枚举/文档（`types.ts`、`store.ts`、`mcp/tools.ts`、CLI `--type` 帮助、`index.html` 表单下拉、`docs/CheatSheet.md`、`UserGuide` 枚举表）。
+1. `test report --format md`：Markdown 报告（范围、通过率、结果分布、覆盖率、失败/未执行/flaky/无用例工作项），可直接管道给 `nexplan docs new --body`。
+2. `nexplan_agent_next` 纳入测试维度：严重缺陷 → （用例仍失败但守护缺陷已 `fixed`/`verified`）去复验 → （有失败用例）去修其关联工作项 → 待办项 → 其它缺陷。
+3. Web 批量记录执行：用例列表多选 → 一次提交统一 结果/环境/构建/批次（复用 `/api/testruns` 数组入口，整套一次提交）。
+4. `WorkItemType` 增加 `test`，同步 8 处枚举与文档。
+
+**C. 健壮性（已交付）**
+
+- C1 MCP 的 `nexplan_test_run_list` / `nexplan_test_report` 返回附 `archive` 摘要（热/归档条数、`oldestHotAt`、`lastArchiveAt`、生效 `hotDays`/`hotMax`），由 `.counters.json` 直接得出（O(1)、不扫月包），工具数仍为 36。
+- C2 `test/perf-guard.test.ts`：以**文件读取计数**（包装 store 同一 `fs.promises` 对象）而非计时来守护「最新 N 条只读 N 个文件」「最新结果按用例早退」「归档门未开时不碰热目录」三条性能性质。
+- C3 项目级归档阈值的端到端测试：两个项目用不同 `project.json` 覆盖，只有阈值紧的会在写入后自动归档，宽松的保持全热，且合并读取仍能看到已归档记录。
 
 **D. 已延期（遗留项，待业主下周评审后决定）**
 
@@ -669,7 +669,7 @@ export interface BoardSummary {
 
 ### 历史计划（保留供对照）
 
-- ~~`nexplan_agent_next` 纳入失败用例优先级~~ → 见 P2 第 2 项。
+- ~~`nexplan_agent_next` 纳入失败用例优先级~~ → **已交付**。
 - ~~`testPolicy.requirePassingOnComplete` 门禁 + `config set-test-policy`~~ → **已在 P0 交付**。
 - ~~`nexplan test import --junit <file.xml>`~~ → 见 **D（已延期）**。
 
@@ -683,11 +683,11 @@ export interface BoardSummary {
 | P0 | id 计数器 + 热/冷合并读取层抽象（§13.6，归档的前置条件） | +0.3 人日 |
 | P1 | ~~报告增强~~（flaky/覆盖率已随报告交付） | — |
 | P1 | **归档**（§13：判定 + 月包 + 门控 + 三端 + 测试） | +1～1.5 人日 |
-| P2 | A1 遗留缺口修复（Web 归档 UI / CLI 批量 / 工作项用例区块 / Admin 计数 / 用例表单 bugs 字段） | 1.3 人日 |
-| P2 | B 新功能（报告 md 导出 / `agent_next` 测试维度 / Web 批量记录 / `WorkItemType: test`） | 1.3 人日 |
-| P2 | C 健壮性（MCP 归档摘要 / 性能守卫测试 / 项目级归档阈值端到端测试） | 0.6 人日 |
+| P2 | ~~A 遗留缺口修复~~（Web 归档 UI / CLI 批量 / 工作项用例区块 / Admin 计数 / 用例表单 bugs 字段） | **已交付** |
+| P2 | ~~B 新功能~~（报告 md 导出 / `agent_next` 测试维度 / Web 批量记录 / `WorkItemType: test`） | **已交付** |
+| P2 | ~~C 健壮性~~（MCP 归档摘要 / 性能守卫测试 / 项目级归档阈值端到端测试） | **已交付** |
 | D | CI 结果导入 —— **已延期**，待评审 | 1～1.5 人日 |
-| **合计** | 已交付约 7 人日；**待做（不含 D）约 3.2 人日**；含 D 约 4.4 人日 | **约 11 人日** |
+| **合计** | 已交付约 10.2 人日；**仅剩 D（延期）约 1～1.5 人日** | **约 11.5 人日** |
 
 ---
 

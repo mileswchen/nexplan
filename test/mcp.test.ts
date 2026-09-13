@@ -258,6 +258,36 @@ describe('MCP server tools', () => {
     expect(r.passRate).toBeCloseTo(66.7, 1);
   });
 
+  it('suggests test-driven work: re-verify a fixed bug whose case still fails, then fix a failing case', async () => {
+    // A work item with a guarded bug and a case that keeps failing.
+    const bug = await call('nexplan_bug_add', { title: 'Guarded defect', severity: 'minor', author: 'codex' });
+    const bugId = (bug.structuredContent as any).id;
+    const item = await call('nexplan_backlog_add', { items: [{ title: 'Fix guarded defect', priority: 'P2' }], author: 'codex' });
+    const itemId = (item.structuredContent as any).created[0].id;
+    await call('nexplan_test_case_add', {
+      items: [{ title: 'Guarded case', status: 'active', workItem: itemId, bugs: [bugId] }],
+      author: 'codex',
+    });
+    await call('nexplan_test_run_record', {
+      runs: [{ caseId: 'TC-1', result: 'fail', actual: 'still broken' }],
+      createBugOnFailure: false,
+      author: 'codex',
+    });
+
+    // With the bug still open, the next thing is to fix it through its work item.
+    const fix = await call('nexplan_agent_next', { author: 'codex' });
+    expect((fix.structuredContent as any).recommendation).toBe('workitem');
+    expect((fix.structuredContent as any).item.id).toBe(itemId);
+    expect((fix.structuredContent as any).reason).toMatch(/TC-1 is failing/);
+
+    // Someone marks the bug fixed while the case still fails → re-check the fix.
+    await call('nexplan_bug_update', { id: bugId, status: 'fixed', author: 'codex' });
+    const verify = await call('nexplan_agent_next', { author: 'codex' });
+    expect((verify.structuredContent as any).recommendation).toBe('test-verify');
+    expect((verify.structuredContent as any).testCase.id).toBe('TC-1');
+    expect((verify.structuredContent as any).reason).toMatch(/still fails while BUG-1 is fixed/);
+  });
+
   it('reports a verification summary when completing an item with failing cases', async () => {
     const item = await call('nexplan_backlog_add', { items: [{ title: 'Gated' }], author: 'codex' });
     const itemId = (item.structuredContent as any).created[0].id;

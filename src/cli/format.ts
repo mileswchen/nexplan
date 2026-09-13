@@ -236,6 +236,72 @@ export function formatTestReport(report: TestReport): string {
   return out.join('\n');
 }
 
+/**
+ * Markdown view of a report, meant to be piped into a versioned document:
+ * `nexplan test report --format md > r.md` then `nexplan docs new ... --body "$(cat r.md)"`.
+ */
+export function formatTestReportMarkdown(report: TestReport, projectKey?: string): string {
+  const t = report.totals;
+  const out: string[] = [];
+  const scopeBits = [
+    `project \`${projectKey ?? report.scope.project}\``,
+    report.scope.batch && `batch \`${report.scope.batch}\``,
+    report.scope.build && `build \`${report.scope.build}\``,
+    report.scope.workItem && `work item \`${report.scope.workItem}\``,
+    (report.scope.from || report.scope.to) && `${report.scope.from ?? '…'} → ${report.scope.to ?? '…'}`,
+  ].filter(Boolean);
+
+  out.push('# Test report', '');
+  out.push(`Scope: ${scopeBits.join(', ')}`, '');
+  out.push(`- Cases: **${t.cases}**`, `- Runs: **${t.runs}**`);
+  out.push(`- Pass rate: **${report.passRate === null ? '-' : `${report.passRate}%`}**`);
+  out.push(
+    `- Results: pass ${t.pass} · fail ${t.fail} · blocked ${t.blocked} · skipped ${t.skipped} · not run ${t.notRun}`,
+  );
+  out.push(
+    `- Work item coverage: ${report.coverage.itemsWithCases}/${report.coverage.itemsTotal}` +
+      (report.coverage.itemsWithoutCasesTotal
+        ? ` (${report.coverage.itemsWithoutCasesTotal} without cases)`
+        : ''),
+  );
+
+  out.push('', '## Failing cases', '');
+  out.push(
+    report.failures.length
+      ? ['| Case | Title | Run | Build | Executed |', '|---|---|---|---|---|']
+          .concat(
+            report.failures.map(
+              (f) => `| ${f.caseId} | ${f.title} | ${f.runId} | ${f.build || '-'} | ${date(f.executedAt)} |`,
+            ),
+          )
+          .join('\n')
+      : '_Nothing failing._',
+  );
+
+  out.push('', '## Not run', '');
+  out.push(
+    report.notRunCases.length
+      ? report.notRunCases.map((c) => `- ${c.caseId} ${c.title}`).join('\n')
+      : '_Every case in scope has been executed._',
+  );
+
+  out.push('', '## Flaky', '');
+  out.push(
+    report.flaky.length
+      ? report.flaky.map((f) => `- ${f.caseId} ${f.title} — pass ${f.pass} / fail ${f.fail}`).join('\n')
+      : '_None._',
+  );
+
+  if (report.coverage.itemsWithoutCasesTotal) {
+    out.push('', '## Work items without test cases', '');
+    out.push(report.coverage.itemsWithoutCases.map((id) => `- ${id}`).join('\n'));
+    if (report.coverage.itemsWithoutCasesTotal > report.coverage.itemsWithoutCases.length) {
+      out.push(`- …and ${report.coverage.itemsWithoutCasesTotal - report.coverage.itemsWithoutCases.length} more`);
+    }
+  }
+  return out.join('\n') + '\n';
+}
+
 export function date(iso: string): string {
   if (!iso) return '-';
   const d = new Date(iso);

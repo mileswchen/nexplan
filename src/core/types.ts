@@ -6,6 +6,7 @@ export type WorkItemType =
   | 'refactor'
   | 'chore'
   | 'research'
+  | 'test'
   | 'bug'
   | 'docs';
 
