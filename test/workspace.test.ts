@@ -251,3 +251,66 @@ describe('git repo ownership', () => {
     }
   });
 });
+
+describe('test policy and the completion gate', () => {
+  it('defaults to a non-blocking policy and merges project overrides', async () => {
+    const defaults = await ws.getTestPolicy('default');
+    expect(defaults.requirePassingOnComplete).toBe(false);
+    expect(defaults.archive).toMatchObject({ auto: true, hotDays: 90, hotMax: 5000, bundle: 'month' });
+
+    await ws.setTestPolicy({ requirePassingOnComplete: true, archive: { hotDays: 30 } });
+    expect(await ws.getTestPolicy('default')).toMatchObject({ requirePassingOnComplete: true });
+    expect((await ws.getTestPolicy('default')).archive.hotDays).toBe(30);
+
+    await ws.createProject({ key: 'api' });
+    await ws.setTestPolicy({ archive: { hotMax: 10 } }, { project: 'api' });
+    const api = await ws.getTestPolicy('api');
+    expect(api.archive).toMatchObject({ hotMax: 10, hotDays: 30 }); // inherits the workspace value
+    expect(api.requirePassingOnComplete).toBe(true);
+    // The default project is untouched by the override.
+    expect((await ws.getTestPolicy('default')).archive.hotMax).toBe(5000);
+    await expect(ws.setTestPolicy({}, { project: 'nope' })).rejects.toThrow(/not found/);
+  });
+
+  it('blocks completion while linked cases fail, unless forced (and records the force)', async () => {
+    const store = ws.getStore('default');
+    const item = await store.createWorkItem({ title: 'Gated work' });
+    const tc = await store.createTestCase({ title: 'Gate case', status: 'active', workItem: item.id });
+    await store.recordTestRun({ caseId: tc.id, result: 'fail', createBugOnFailure: false });
+
+    // Gate off (default): completes, and returns the verification summary.
+    const free = await ws.completeWorkItem('default', item.id, { author: 'test-agent' });
+    expect(free.verification).toMatchObject({ cases: 1, fail: 1 });
+    expect(free.item.notes.some((n) => n.body.includes('failing'))).toBe(true);
+
+    // Gate on: refused, then allowed with force — with an audit note.
+    await ws.setTestPolicy({ requirePassingOnComplete: true });
+    const second = await store.createWorkItem({ title: 'Gated work 2' });
+    const tc2 = await store.createTestCase({ title: 'Gate case 2', status: 'active', workItem: second.id });
+    await store.recordTestRun({ caseId: tc2.id, result: 'fail', createBugOnFailure: false });
+
+    await expect(ws.completeWorkItem('default', second.id, { author: 'test-agent' })).rejects.toThrow(
+      /linked test cases are 1 failing/,
+    );
+    const forced = await ws.completeWorkItem('default', second.id, { author: 'test-agent', force: true, note: 'hotfix' });
+    expect(forced.item.status).toBe('done');
+    expect(forced.item.notes.some((n) => n.body.includes('forced completion'))).toBe(true);
+
+    // A work item with no linked cases is never blocked.
+    const plain = await store.createWorkItem({ title: 'No cases' });
+    const ok = await ws.completeWorkItem('default', plain.id, { author: 'test-agent' });
+    expect(ok.item.status).toBe('done');
+  });
+
+  it('refuses to force when the project forbids it', async () => {
+    const store = ws.getStore('default');
+    const item = await store.createWorkItem({ title: 'Strict' });
+    const tc = await store.createTestCase({ title: 'Strict case', status: 'active', workItem: item.id });
+    await store.recordTestRun({ caseId: tc.id, result: 'fail', createBugOnFailure: false });
+    await ws.setTestPolicy({ requirePassingOnComplete: true, allowForce: false });
+
+    await expect(
+      ws.completeWorkItem('default', item.id, { author: 'test-agent', force: true }),
+    ).rejects.toThrow(/force is disabled/);
+  });
+});
