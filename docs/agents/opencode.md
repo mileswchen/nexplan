@@ -28,6 +28,7 @@ Pass `author: "opencode"` on write tools for attribution.
 
 ```bash
 export NEXPLAN_BOARD="$PWD/.nexplan"
-nexplan decompose WI-2 --child "接口层" --child "存储层"
+nexplan decompose WI-2 --child "接口层" --child "存储层"   # max 3 levels
+nexplan tree WI-2                                        # show the attachment
 nexplan done WI-4 --note "完成并测试"
 ```

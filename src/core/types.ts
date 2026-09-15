@@ -29,6 +29,19 @@ export interface Note {
   at: string;
 }
 
+/**
+ * Maximum decomposition depth, in levels, counting the task itself as level 1:
+ *
+ *   depth 1  WI-1  task
+ *   depth 2  WI-2  └─ subtask
+ *   depth 3  WI-3      └─ sub-subtask   ← last level that may be decomposed
+ *
+ * `decomposeWorkItem` and `moveWorkItem` refuse to go past this. Reads stay
+ * permissive: data written before the cap (or by hand) is still returned, with
+ * `depth` / `overCap` telling the UI it sits below the limit.
+ */
+export const MAX_WORK_ITEM_DEPTH = 3;
+
 export interface WorkItem {
   id: string; // WI-N
   type: WorkItemType;
@@ -49,6 +62,44 @@ export interface WorkItem {
   updatedAt: string; // ISO
   completedAt: string | null;
   notes: Note[];
+}
+
+/** Rollup over a set of work items (direct children or a whole subtree). */
+export interface WorkItemRollup {
+  total: number;
+  done: number;
+  open: number;
+}
+
+/**
+ * A work item rendered as a node of the decomposition tree. Derived, never
+ * persisted — `children` (ids) stays the source of truth on disk.
+ */
+export interface WorkItemNode extends WorkItem {
+  /** 1-based absolute depth: 1 = top-level task, 2 = subtask, 3 = sub-subtask. */
+  depth: number;
+  /** True when this item sits deeper than `MAX_WORK_ITEM_DEPTH` (legacy/hand-written data). */
+  overCap: boolean;
+  /** True for the tree root the caller asked for. */
+  root: boolean;
+  /** True when the item itself matched the query that produced this tree. */
+  matched: boolean;
+  /** Direct children, expanded as nodes (ordered as stored, i.e. creation order). */
+  childNodes: WorkItemNode[];
+  /** Rollup over direct children only. */
+  childProgress: WorkItemRollup;
+  /** Rollup over every descendant, excluding this item. */
+  subtree: WorkItemRollup;
+}
+
+/** A work item plus its ancestor chain, root-first, for breadcrumbs. */
+export interface WorkItemPath {
+  item: WorkItem;
+  /** Ancestors, root-first, excluding `item` itself. */
+  ancestors: WorkItem[];
+  /** 1-based absolute depth (1 = top level). */
+  depth: number;
+  overCap: boolean;
 }
 
 export type BugSeverity = 'critical' | 'major' | 'minor' | 'trivial';
@@ -177,6 +228,10 @@ export interface ListFilter {
   assignee?: string;
   tags?: string[];
   query?: string; // substring on title/description
+  /** Restrict to the direct children of one item, or to top-level items (`null`). */
+  parent?: string | null;
+  /** Restrict to one absolute depth (1..MAX_WORK_ITEM_DEPTH); tree listings only. */
+  depth?: number;
   limit?: number;
 }
 
@@ -341,6 +396,12 @@ export interface WorkItemVerification {
   notRun: number;
   failing: string[];
   notRunCases: string[];
+  /** Direct children of this item (decomposition rollup). */
+  childrenTotal: number;
+  childrenDone: number;
+  /** Children that are not `done` yet — the reason a parent is still open. */
+  childrenOpen: number;
+  childrenOpenIds: string[];
 }
 
 // ---- archive (cold storage) --------------------------------------------------

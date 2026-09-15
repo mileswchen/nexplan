@@ -86,3 +86,83 @@ describe('cli: batch run reporting', () => {
     await expect(cli(['test', 'run', 'TC-1'])).rejects.toThrow(/--result must be one of/);
   }, 90_000);
 });
+
+describe('cli: work item hierarchy', () => {
+  it('shows the decomposition tree, breadcrumbs and moves over the CLI', async () => {
+    await cli(['add', 'Ship v4', '--type', 'feature']);
+    await cli(['decompose', 'WI-1', '--child', 'API', '--child', 'Docs']);
+    await cli(['add', 'Schema', '--parent', 'WI-2']);
+    await cli(['update', 'WI-3', '--status', 'done']);
+
+    // `list --tree` renders the attachment with connectors and progress.
+    const { stdout: tree } = await cli(['list', '--tree']);
+    expect(tree).toMatch(/WI-1.*Ship v4.*↳ 1\/2 done/);
+    expect(tree).toMatch(/├─ WI-2.*API.*↳ 0\/1 done/);
+    expect(tree).toMatch(/│  └─ WI-4.*Schema/);
+    expect(tree).toMatch(/└─ WI-3.*Docs/);
+
+    // `tree <id>` prints one subtree, plus where it hangs.
+    const { stdout: sub } = await cli(['tree', 'WI-4']);
+    expect(sub).toMatch(/in: WI-1 › WI-2 › WI-4\s+\(level 3\/3\)/);
+    expect(sub).toMatch(/WI-4.*Schema/);
+
+    // `get` shows the parent chain and the subtask block.
+    const { stdout: full } = await cli(['get', 'WI-2']);
+    expect(full).toMatch(/in: WI-1 › WI-2/);
+    expect(full).toMatch(/subtasks:\nWI-4\s+P2\s+backlog\s+\[task\]\s+Schema/);
+
+    // Filters: subtasks of one item, and one absolute depth.
+    const { stdout: kids } = await cli(['list', '--parent', 'WI-2']);
+    expect(kids).toMatch(/WI-4/);
+    expect(kids).not.toMatch(/WI-1/);
+    const { stdout: lvl3 } = await cli(['list', '--depth', '3']);
+    expect(lvl3.trim().split('\n')).toHaveLength(1);
+
+    // The cap is enforced: WI-4 is a level-3 item.
+    await expect(cli(['decompose', 'WI-4', '--child', 'Nope'])).rejects.toThrow(/level 3/);
+
+    // move re-attaches, and refuses cycles.
+    const { stdout: moved } = await cli(['move', 'WI-3', '--parent', 'WI-2']);
+    expect(moved).toMatch(/moved WI-3 → WI-2/);
+    await expect(cli(['move', 'WI-2', '--parent', 'WI-3'])).rejects.toThrow(/cycle/);
+    const { stdout: promoted } = await cli(['move', 'WI-3']);
+    expect(promoted).toMatch(/moved WI-3 → top level/);
+
+    // JSON output exposes the node metadata agents consume.
+    const { stdout: json } = await cli(['--json', 'tree', 'WI-1']);
+    const node = JSON.parse(json) as Record<string, unknown>;
+    expect(node.depth).toBe(1);
+    // WI-3 was promoted to the top level above, so WI-1 keeps WI-2 → WI-4.
+    expect(node.subtree).toEqual({ total: 2, done: 0, open: 2 });
+    expect((node.childNodes as unknown[]).length).toBe(1);
+    const { stdout: roots } = await cli(['--json', 'tree']);
+    const forest = JSON.parse(roots) as Array<Record<string, unknown>>;
+    expect(forest.map((n) => n.id).sort()).toEqual(['WI-1', 'WI-3']);
+  });
+});
+
+describe('cli: project key and name editing', () => {
+  it('renames a project key and edits its display name', async () => {
+    await cli(['project', 'new', 'old', '--name', 'Old name']);
+    await cli(['add', 'Keep me', '--project', 'old']);
+
+    const { stdout: renamed } = await cli(['project', 'rename', 'old', 'new']);
+    expect(renamed).toMatch(/renamed project old → new/);
+
+    // The data moved with the key.
+    const { stdout: items } = await cli(['--project', 'new', '--json', 'list']);
+    expect((JSON.parse(items) as Array<{ title: string }>).map((i) => i.title)).toEqual(['Keep me']);
+    const { stdout: keys } = await cli(['--json', 'project', 'list']);
+    expect((JSON.parse(keys) as Array<{ key: string }>).map((p) => p.key)).toEqual(['default', 'new']);
+
+    // `project update --key` renames and edits the display fields in one call.
+    const { stdout: updated } = await cli(['project', 'update', 'new', '--name', 'Backend', '--key', 'backend']);
+    expect(updated).toMatch(/updated project backend — Backend \(renamed from new\)/);
+    const { stdout: shown } = await cli(['project', 'show', 'backend']);
+    expect(shown).toMatch(/backend — Backend/);
+
+    // The old key is gone; the new one resolves.
+    await expect(cli(['project', 'show', 'new'])).rejects.toThrow(/not found/);
+    await expect(cli(['project', 'rename', 'backend', 'bad key'])).rejects.toThrow(/invalid project key/);
+  });
+});

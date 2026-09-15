@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/core/store.js';
@@ -114,6 +114,157 @@ describe('work items', () => {
     expect((await store.getWorkItem(parent.id))?.children).toEqual([]);
     // Deleting an unknown id throws.
     await expect(store.deleteWorkItem('WI-999')).rejects.toThrow(/not found/);
+  });
+});
+
+describe('work item hierarchy', () => {
+  /** WI-1 → WI-2 → WI-3, i.e. task → subtask → sub-subtask. */
+  async function threeLevels() {
+    const task = await store.createWorkItem({ title: 'Ship v1', type: 'feature' });
+    const { children: subs } = await store.decomposeWorkItem(task.id, [{ title: 'Build API' }]);
+    const { children: subsubs } = await store.decomposeWorkItem(subs[0].id, [{ title: 'Design schema' }]);
+    return { task, sub: subs[0], subsub: subsubs[0] };
+  }
+
+  it('builds a 3-level tree with depths, rollups and a breadcrumb path', async () => {
+    const { task, sub, subsub } = await threeLevels();
+    const tree = await store.getWorkItemTree(task.id);
+    expect(tree?.depth).toBe(1);
+    expect(tree?.root).toBe(true);
+    expect(tree?.childNodes.map((n) => n.id)).toEqual([sub.id]);
+    expect(tree?.childNodes[0].depth).toBe(2);
+    expect(tree?.childNodes[0].childNodes.map((n) => n.id)).toEqual([subsub.id]);
+    expect(tree?.childNodes[0].childNodes[0].depth).toBe(3);
+    expect(tree?.childNodes[0].childNodes[0].overCap).toBe(false);
+    // Rollups: the deep node counts toward both the child and the subtree totals.
+    expect(tree?.childProgress).toEqual({ total: 1, done: 0, open: 1 });
+    expect(tree?.subtree).toEqual({ total: 2, done: 0, open: 2 });
+    await store.completeWorkItem(subsub.id, { closeLinkedBugs: false });
+    const after = await store.getWorkItemTree(task.id);
+    expect(after?.subtree).toEqual({ total: 2, done: 1, open: 1 });
+
+    const path = await store.workItemPath(subsub.id);
+    expect(path?.depth).toBe(3);
+    expect(path?.ancestors.map((a) => a.id)).toEqual([task.id, sub.id]);
+    expect(await store.getWorkItemTree('WI-404')).toBeNull();
+    expect(await store.workItemPath('WI-404')).toBeNull();
+  });
+
+  it('refuses to decompose past the 3-level cap', async () => {
+    const { subsub } = await threeLevels();
+    await expect(store.decomposeWorkItem(subsub.id, [{ title: 'Too deep' }])).rejects.toThrow(/3 levels|level 3/);
+    // Nothing was created by the refused call.
+    expect(await store.listWorkItems()).toHaveLength(3);
+  });
+
+  it('filters by parent and depth, and lists an attached forest', async () => {
+    const { task, sub, subsub } = await threeLevels();
+    const other = await store.createWorkItem({ title: 'Unrelated' });
+
+    expect((await store.listWorkItems({ parent: sub.id })).map((i) => i.id)).toEqual([subsub.id]);
+    expect((await store.listWorkItems({ parent: null })).map((i) => i.id).sort()).toEqual([task.id, other.id].sort());
+    expect((await store.listWorkItems({ depth: 3 })).map((i) => i.id)).toEqual([subsub.id]);
+
+    // A filter that matches only the deepest item still shows where it hangs:
+    // the match becomes the root of its own subtree.
+    const forest = await store.listWorkItemTrees({ query: 'Design schema' });
+    expect(forest.map((n) => n.id)).toEqual([subsub.id]);
+    expect(forest[0].root).toBe(true);
+    expect(forest[0].matched).toBe(true);
+    expect(forest[0].depth).toBe(3);
+
+    // Matching an ancestor and a descendant never duplicates the descendant.
+    const both = await store.listWorkItemTrees({ status: ['backlog'] });
+    expect(both.map((n) => n.id).sort()).toEqual([task.id, other.id].sort());
+    const taskNode = both.find((n) => n.id === task.id)!;
+    expect(taskNode.childNodes[0].childNodes[0].matched).toBe(true);
+    expect(taskNode.childNodes[0].childNodes[0].root).toBe(false);
+  });
+
+  it('re-parents with moveWorkItem and keeps both sides of the link', async () => {
+    const { task, sub, subsub } = await threeLevels();
+    const other = await store.createWorkItem({ title: 'Other feature' });
+    // Move the middle item (with its child) under an unrelated task.
+    const moved = await store.moveWorkItem(sub.id, other.id);
+    expect(moved.parent).toBe(other.id);
+    expect(moved.notes.at(-1)?.body).toContain('moved');
+    expect((await store.getWorkItem(task.id))?.children).toEqual([]);
+    expect((await store.getWorkItem(other.id))?.children).toEqual([sub.id]);
+    // The subtree came along.
+    const tree = await store.getWorkItemTree(other.id);
+    expect(tree?.childNodes[0].id).toBe(sub.id);
+    expect(tree?.childNodes[0].childNodes[0].id).toBe(subsub.id);
+    expect(tree?.subtree).toEqual({ total: 2, done: 0, open: 2 });
+
+    // Promote back to the top level.
+    const promoted = await store.moveWorkItem(sub.id, null);
+    expect(promoted.parent).toBeNull();
+    expect((await store.getWorkItem(other.id))?.children).toEqual([]);
+    expect((await store.workItemPath(sub.id))?.depth).toBe(1);
+
+    // A no-op move leaves the item untouched.
+    expect((await store.moveWorkItem(sub.id, null)).parent).toBeNull();
+  });
+
+  it('rejects cycles and depth overflow when moving', async () => {
+    const { task, sub, subsub } = await threeLevels();
+    await expect(store.moveWorkItem(task.id, sub.id)).rejects.toThrow(/cycle/);
+    await expect(store.moveWorkItem(task.id, subsub.id)).rejects.toThrow(/cycle/);
+    await expect(store.moveWorkItem(task.id, task.id)).rejects.toThrow(/own parent/);
+    // WI-2 → WI-3 is 2 levels; hanging it under a level-2 item would make 4.
+    const otherRoot = await store.createWorkItem({ title: 'Root' });
+    const { children: otherSubs } = await store.decomposeWorkItem(otherRoot.id, [{ title: 'Sub' }]);
+    await expect(store.moveWorkItem(sub.id, otherSubs[0].id)).rejects.toThrow(/limit 3|limited to 3/);
+    await expect(store.moveWorkItem('WI-999', null)).rejects.toThrow(/not found/);
+    await expect(store.moveWorkItem(sub.id, 'WI-999')).rejects.toThrow(/parent work item not found/);
+  });
+
+  it('creates a subtask directly under a parent, both sides in sync', async () => {
+    const parent = await store.createWorkItem({ title: 'Parent', priority: 'P1', tags: ['api'] });
+    const child = await store.createWorkItem({ title: 'Child', parent: parent.id });
+    expect(child.parent).toBe(parent.id);
+    expect(child.priority).toBe('P1'); // inherits from the parent
+    expect(child.tags).toEqual(['api']);
+    expect((await store.getWorkItem(parent.id))?.children).toEqual([child.id]);
+    // The cap applies to direct creation too.
+    const grand = await store.createWorkItem({ title: 'Grandchild', parent: child.id });
+    await expect(store.createWorkItem({ title: 'Too deep', parent: grand.id })).rejects.toThrow(/limited to 3 levels/);
+    await expect(store.createWorkItem({ title: 'Orphan', parent: 'WI-999' })).rejects.toThrow(/parent work item not found/);
+  });
+
+  it('guards the parent/children links against raw patches', async () => {
+    const { task, sub } = await threeLevels();
+    await expect(store.updateWorkItem(sub.id, { parent: null })).rejects.toThrow(/moveWorkItem/);
+    await expect(store.updateWorkItem(task.id, { children: [] })).rejects.toThrow(/decomposeWorkItem|moveWorkItem/);
+    // Re-sending the current values is allowed (idempotent patches must not throw).
+    const current = (await store.getWorkItem(sub.id))!;
+    const same = await store.updateWorkItem(sub.id, { parent: current.parent, children: current.children });
+    expect(same.parent).toBe(task.id);
+    // Unrelated fields still update normally.
+    const renamed = await store.updateWorkItem(sub.id, { title: 'Renamed' });
+    expect(renamed.title).toBe('Renamed');
+  });
+
+  it('rolls child progress into the completion verification', async () => {
+    const { task, sub } = await threeLevels();
+    const before = await store.verificationForWorkItem(task.id);
+    expect(before.childrenTotal).toBe(1);
+    expect(before.childrenDone).toBe(0);
+    expect(before.childrenOpenIds).toEqual([sub.id]);
+    const { verification } = await store.completeWorkItem(task.id, { closeLinkedBugs: false });
+    expect(verification.childrenOpen).toBe(1);
+    expect((await store.getWorkItem(task.id))?.notes.at(-2)?.body).toContain('0/1 child item(s) done');
+  });
+
+  it('survives a cycle written directly to disk', async () => {
+    const { task, sub } = await threeLevels();
+    // Hand-written bad data: WI-1 is its own grandparent.
+    const raw = JSON.parse(await readFile(path.join(dir, 'workitems', `${task.id}.json`), 'utf8'));
+    raw.parent = sub.id;
+    await writeFile(path.join(dir, 'workitems', `${task.id}.json`), JSON.stringify(raw));
+    const tree = await store.getWorkItemTree(task.id); // must terminate
+    expect(tree?.id).toBe(task.id);
+    expect(tree?.childNodes.map((n) => n.id)).toEqual([sub.id]);
   });
 });
 

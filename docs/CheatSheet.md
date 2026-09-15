@@ -42,13 +42,15 @@ nexplan web                                                      # 打开看板�
 
 | 命令 | 说明 |
 |---|---|
-| `nexplan add "<t>" [--type t] [--priority P] [--description d] [--assignee n] [--tags a,b] [--estimate n] [--fixes-bug B1,B2] [--doc-link url] [--manual]` | 新增工作项 |
-| `nexplan list [--status s] [--type t] [--priority p] [--assignee n] [--tags a,b] [--query q] [--limit n]` | 列出 |
-| `nexplan get <id>` | 详情 |
+| `nexplan add "<t>" [--type t] [--priority P] [--description d] [--assignee n] [--tags a,b] [--estimate n] [--fixes-bug B1,B2] [--doc-link url] [--parent WI-1] [--manual]` | 新增工作项（`--parent` 直接挂为子任务）|
+| `nexplan list [--status s] [--type t] [--priority p] [--assignee n] [--tags a,b] [--query q] [--parent WI-1\|top] [--depth 1..3] [--tree] [--limit n]` | 列出（`--tree` 按挂接关系显示）|
+| `nexplan tree [<id>] [--depth n]` | 分解树：任务 → 子任务 → 子子任务（最多 3 层）|
+| `nexplan get <id>` | 详情（含上级链路与子任务）|
 | `nexplan claim <id> --assignee <n>` | 认领（→ in_progress）|
 | `nexplan update <id> [--status s] [--title t] [--priority p] …` | 编辑 |
 | `nexplan done <id> [--note n] [--no-close-bugs]` | 完成（→ done，自动关 bug）|
-| `nexplan decompose <parentId> --child "<c>" …` | 拆分 |
+| `nexplan decompose <parentId> --child "<c>" --child "<c>"` | 拆分（最多 3 层；子项自动挂到父项）|
+| `nexplan move <id> [--parent WI-1]` | 改挂接（省略 `--parent` 即提升为顶层；拒绝成环与超 3 层）|
 | `nexplan note <id> <body>` | 加备注 |
 | `nexplan rm <id>` | 删除（仅创建者或管理员）|
 
@@ -85,6 +87,7 @@ nexplan web [--port n] [--remote]   # Web 看板（默认 3344；--remote = 允�
 | 命令 | 说明 |
 |---|---|
 | `nexplan project list` / `new <key> [--name n] [--members a,b]` / `use <key>` / `show <key>` / `rm <key>` | 项目管理 |
+| `nexplan project update <key> [--key 新key] [--name n] [--members a,b]` / `rename <key> <新key>` | 改 key（数据目录一起迁移）与名称 |
 | `nexplan user list` / `add <id> [--kind human\|agent] [--role r] [--password pw]` / `role <id> <admin\|member\|viewer>` / `password <id> [<pw>]` / `rm <id>` | 用户与角色（`--password` = Web 登录密码，给人类用户）|
 | `nexplan config set-enforce-permissions <true\|false>` | 仅限已注册用户写入；`admin` 才能管理；`viewer` 只读 |
 | `nexplan agent config <id> [--project key]` | 打印限定到 Agent+项目的 MCP 配置 |
@@ -102,7 +105,7 @@ args:    ["/abs/path/nexplan/dist/mcp/server.js"]
 env:     { NEXPLAN_BOARD: "...", NEXPLAN_PROJECT: "<key>", NEXPLAN_AGENT: "<agent>" }
 ```
 
-36 个 `nexplan_*` 工具：`backlog_add/list/get/claim/update/complete/decompose/note/delete`、
+39 个 `nexplan_*` 工具：`backlog_add/list/get/tree/claim/update/complete/decompose/move/note/delete`、
 `docs_list/get/create/update/history/diff/comment`、`bug_add/list/get/update`、
 `test_case_add/list/get/update/delete`、`test_run_record/list`、`test_report`、
 `status`、`agent_next`、`project_list/create/set_default`、`user_list/add/update`。

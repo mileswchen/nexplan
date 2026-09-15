@@ -14,13 +14,14 @@ trail, diffs, conflict-safe parallel work, and real version history for document
 
 | Capability | How it works |
 |---|---|
-| **Manually enter backlog** | Web kanban board / `nexplan add` CLI / MCP `nexplan_backlog_add` |
-| **Agent enters decomposed tasks into backlog** | MCP `nexplan_backlog_decompose` / `nexplan_backlog_add` |
+| **Manually enter backlog** | Web kanban board (every summary chip drills into the records behind it) / `nexplan add` CLI / MCP `nexplan_backlog_add` |
+| **Agent enters decomposed tasks into backlog** | MCP `nexplan_backlog_decompose` / `nexplan_backlog_add` (`parent`) |
+| **Task → subtask → sub-subtask hierarchy (3 levels)** | `parent` + `children` links on every item; the board, `nexplan tree` and `nexplan_backlog_tree` show how work hangs together, with progress rollups and re-parenting (`nexplan move`) |
 | **Agent claims an item; status updates automatically when done** | `nexplan_backlog_claim` → `nexplan_backlog_complete` |
 | **Design & decision docs (versioned)** | MCP `nexplan_docs_create/update/history/diff`; every update creates a git version |
 | **Manually entered bugs + agent-discovered bugs** | `nexplan_bug_add/list/update`; auto-`fixed` when the linked item completes |
 | **Test cases + execution records** | `nexplan_test_case_add/list/update`, `nexplan_test_run_record` (batch), `nexplan_test_report`; a failing run files a bug, a passing run fixes/verifies the bugs it guards. `nexplan test report --format md` pipes straight into a versioned doc |
-| **Multi-project management** | One workspace holds multiple projects, each with its own backlog / bugs / docs; select via `--project` / `?project=` / MCP `project` parameter |
+| **Multi-project management** | One workspace holds multiple projects, each with its own backlog / bugs / docs; select via `--project` / `?project=` / MCP `project` parameter. Rename a project's key and/or display name from the Web admin tab, `nexplan project update`, or MCP `nexplan_project_update` — the data directory moves with the key |
 | **Multi-user management** | User registry (humans + agents) with `admin / member / viewer` roles; `viewer` is read-only, can be strictly enforced |
 | **Access control** | Project member-roster check (projects with a roster are limited to members + admins); with strict mode enabled, only `admin` can manage |
 
@@ -65,7 +66,7 @@ node dist/cli/index.js list
 ## The three interfaces
 
 - **CLI** (`nexplan …`) — humans and scripting.
-- **MCP server** (`node dist/mcp/server.js`) — agents. Exposes 36 `nexplan_*` tools.
+- **MCP server** (`node dist/mcp/server.js`) — agents. Exposes 39 `nexplan_*` tools.
 - **Web dashboard** (`nexplan web`) — humans: kanban board, bug tracker, doc viewer/history, and a projects/users admin panel.
 
 All three share the same git-backed workspace + `Store`, so they are fully consistent.
@@ -100,7 +101,7 @@ counter in frontmatter; document history and diffs come straight from git.
 
 ```bash
 npm run build        # tsc → dist/
-npm test             # vitest: 103 tests across core store, MCP, CLI, web (HTTP), i18n
+npm test             # vitest: 123 tests across core store, MCP, CLI, web (HTTP), i18n
 npm run typecheck    # tsc --noEmit
 npm run dev:mcp      # run the MCP server from source
 npm run dev:web      # run the web server from source
@@ -117,13 +118,15 @@ silently stop testing anything.
 Global options: `--root <path>` (workspace dir), `--project <key>`, `--json`.
 
 ```
-nexplan add "<title>" [--type t] [--priority P] [--description d] [--tags a,b] [--assignee name] [--doc-link url] [--manual] [--json-input] [--project key]
-nexplan list [--status s] [--priority p] [--assignee name] [--query q] [--limit n] [--project key]
+nexplan add "<title>" [--type t] [--priority P] [--description d] [--tags a,b] [--assignee name] [--doc-link url] [--parent WI-1] [--manual] [--json-input] [--project key]
+nexplan list [--status s] [--priority p] [--assignee name] [--query q] [--parent WI-1|top] [--depth 1..3] [--tree] [--limit n] [--project key]
+nexplan tree [<id>] [--depth n] [--project key]     # decomposition tree, with connectors + progress
 nexplan get <id> [--project key]
 nexplan claim <id> --assignee name [--project key]
 nexplan update <id> [--status s] [--title t] [--priority p] [--doc-link url] ... [--project key]
 nexplan done <id> [--note n] [--no-close-bugs] [--project key]
-nexplan decompose <parentId> --child "subtask A" [--project key]
+nexplan decompose <parentId> --child "subtask A" --child "subtask B" [--project key]   # max 3 levels
+nexplan move <id> [--parent WI-1] [--project key]   # re-attach, or promote to top level
 nexplan note <id> <body> [--project key]
 nexplan rm <id> [--project key]   # delete a work item (creator or admin only)
 nexplan bug add "<title>" [--severity s] [--evidence e] [--manual] [--project key]
@@ -148,6 +151,8 @@ nexplan web [--port n] [--host h | --remote]   # --remote = 0.0.0.0, allow other
 # Multi-project
 nexplan project list
 nexplan project new <key> [--name n] [--description d] [--members a,b]
+nexplan project update <key> [--key newKey] [--name n] [--description d] [--members a,b]
+nexplan project rename <key> <newKey>   # renames the data directory too
 nexplan project use <key>      # set default project
 nexplan project show <key>
 nexplan project rm <key>
@@ -165,6 +170,43 @@ nexplan agent config <user-id> [--project key]   # print an MCP config scoped to
 ```
 
 Add `--json` to any command for JSON output.
+
+## Task hierarchy
+
+Work items form a tree, capped at **3 levels** (task → subtask → sub-subtask):
+
+```
+WI-1  P1  in_progress  [feature]  Ship v1        ↳ 1/2 done
+├─ WI-2  P2  done  [task]  Build API
+└─ WI-3  P2  backlog  [task]  Write docs         ↳ 0/1 done
+   └─ WI-4  P2  backlog  [task]  Publish changelog
+```
+
+- **Attach while creating** — `nexplan add "Publish changelog" --parent WI-3`, or MCP
+  `nexplan_backlog_add { "items": [{ "title": "…", "parent": "WI-3" }] }`. The subtask
+  inherits the parent's priority, tags and doc link unless you override them.
+- **Split in one call** — `nexplan decompose WI-1 --child "…" --child "…"`, or MCP
+  `nexplan_backlog_decompose`. Both sides of the link (`child.parent` and
+  `parent.children`) are written in one transaction, so no commit can leave half a
+  link behind — the same reason raw `parent`/`children` patches are rejected.
+- **Read it back** — `nexplan tree WI-1`, `nexplan list --tree`, MCP
+  `nexplan_backlog_tree`, REST `GET /api/workitems?tree=1`. Nodes carry `depth`,
+  `childNodes`, `childProgress` and a whole-subtree rollup. In the web dashboard every
+  subtask card shows a breadcrumb to its parent plus a `2/3 done` badge, and the
+  Board/Tree switch renders the full attached tree.
+- **Re-attach** — `nexplan move WI-4 --parent WI-2` (or `--parent none` to promote it
+  to the top level), MCP `nexplan_backlog_move`, REST
+  `POST /api/workitems/WI-4/move`. Cycles and moves that would exceed 3 levels are
+  refused, and the move is recorded as a note.
+- **Filter by position** — `--parent WI-1` (or `top`), `--depth 3`; a filtered tree
+  still shows the ancestors/descendants needed to keep the attachment visible
+  (marked `matched: false`).
+- **Completion** — completing a parent while subtasks are open is allowed but recorded
+  in its notes (`0/1 child item(s) done — still open: WI-4`), and the response carries
+  `verification.childrenOpen` / `childrenDone` / `childrenTotal`.
+
+Items deeper than 3 levels that were written by hand (or by an older version) are
+still read and displayed, flagged as `overCap` / "Beyond level 3".
 
 ## Access control
 

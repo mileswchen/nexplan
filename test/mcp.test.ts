@@ -52,7 +52,10 @@ describe('MCP server tools', () => {
     expect(names).toContain('nexplan_test_case_add');
     expect(names).toContain('nexplan_test_run_record');
     expect(names).toContain('nexplan_test_report');
-    expect(names.length).toBe(36);
+    expect(names).toContain('nexplan_backlog_tree');
+    expect(names).toContain('nexplan_backlog_move');
+    expect(names).toContain('nexplan_project_update');
+    expect(names.length).toBe(39);
   });
 
   it('adds a backlog item and lists it', async () => {
@@ -108,6 +111,58 @@ describe('MCP server tools', () => {
     expect((r.structuredContent as any).parent.children).toEqual(children.map((c: any) => c.id));
   });
 
+  it('exposes the decomposition tree through the MCP tools', async () => {
+    const root = await call('nexplan_backlog_add', { items: [{ title: 'Ship v2' }] });
+    const rootId = (root.structuredContent as any).created[0].id;
+    const kids = await call('nexplan_backlog_decompose', {
+      parentId: rootId,
+      children: [{ title: 'API' }, { title: 'Docs' }],
+    });
+    const apiId = (kids.structuredContent as any).children[0].id;
+    // A subtask created directly under a parent via `parent`.
+    const deep = await call('nexplan_backlog_add', { items: [{ title: 'Schema', parent: apiId }] });
+    const deepId = (deep.structuredContent as any).created[0].id;
+
+    const tree = await call('nexplan_backlog_tree', { id: rootId });
+    const node = tree.structuredContent as any;
+    expect(node.depth).toBe(1);
+    expect(node.childNodes).toHaveLength(2);
+    expect(node.childNodes[0].depth).toBe(2);
+    expect(node.childNodes[0].childNodes[0].id).toBe(deepId);
+    expect(node.childNodes[0].childNodes[0].depth).toBe(3);
+    expect(node.subtree).toEqual({ total: 3, done: 0, open: 3 });
+
+    // The 3-level cap is enforced by the tools as well.
+    const tooDeep = await call('nexplan_backlog_decompose', { parentId: deepId, children: [{ title: 'Nope' }] });
+    expect(tooDeep.isError).toBe(true);
+
+    // Flat listing can still be narrowed to subtasks or one absolute depth.
+    const subs = await call('nexplan_backlog_list', { parent: apiId });
+    expect((subs.structuredContent as any).items.map((i: any) => i.id)).toEqual([deepId]);
+    const top = await call('nexplan_backlog_list', { parent: 'top', tree: true });
+    expect((top.structuredContent as any).items.map((n: any) => n.id)).toEqual([rootId]);
+    const level3 = await call('nexplan_backlog_list', { depth: 3 });
+    expect((level3.structuredContent as any).items.map((i: any) => i.id)).toEqual([deepId]);
+  });
+
+  it('re-attaches an item with nexplan_backlog_move', async () => {
+    const a = await call('nexplan_backlog_add', { items: [{ title: 'A' }] });
+    const b = await call('nexplan_backlog_add', { items: [{ title: 'B' }] });
+    const aId = (a.structuredContent as any).created[0].id;
+    const bId = (b.structuredContent as any).created[0].id;
+    const child = await call('nexplan_backlog_add', { items: [{ title: 'A child', parent: aId }] });
+    const childId = (child.structuredContent as any).created[0].id;
+
+    const moved = await call('nexplan_backlog_move', { id: childId, parent: bId, author: 'codex' });
+    expect((moved.structuredContent as any).parent).toBe(bId);
+    // Cycles are refused.
+    const cycle = await call('nexplan_backlog_move', { id: bId, parent: childId });
+    expect(cycle.isError).toBe(true);
+    // Moving back to the top level.
+    const promoted = await call('nexplan_backlog_move', { id: childId, parent: null });
+    expect((promoted.structuredContent as any).parent).toBeNull();
+  });
+
   it('creates, updates, and shows version history for a doc', async () => {
     const doc = await call('nexplan_docs_create', { title: 'ADR: DB', type: 'decision', body: 'v1' });
     const slug = (doc.structuredContent as any).slug;
@@ -142,6 +197,27 @@ describe('MCP server tools', () => {
     expect(b.totalWorkItems).toBe(1);
     expect(b.totalBugs).toBe(1);
     expect(b.projectKey).toBe('default');
+  });
+
+  it('updates a project key and name over MCP', async () => {
+    await call('nexplan_project_create', { key: 'editable', name: 'Editable', author: 'admin' });
+    const item = await call('nexplan_backlog_add', { items: [{ title: 'Survives' }], project: 'editable', author: 'admin' });
+    expect((item.structuredContent as any).created[0].id).toBe('WI-1');
+
+    const renamed = await call('nexplan_project_update', { key: 'editable', newKey: 'renamed', name: 'Renamed', author: 'admin' });
+    expect((renamed.structuredContent as any).key).toBe('renamed');
+    expect((renamed.structuredContent as any).name).toBe('Renamed');
+
+    const list = await call('nexplan_project_list', {});
+    const keys = (list.structuredContent as any).items.map((p: any) => p.key);
+    expect(keys).toContain('renamed');
+    expect(keys).not.toContain('editable');
+    // The work item moved with the project.
+    const items = await call('nexplan_backlog_list', { project: 'renamed' });
+    expect((items.structuredContent as any).items.map((i: any) => i.title)).toEqual(['Survives']);
+    // Bad keys are refused.
+    const bad = await call('nexplan_project_update', { key: 'renamed', newKey: 'bad key', author: 'admin' });
+    expect(bad.isError).toBe(true);
   });
 
   it('creates a project and isolates work within it', async () => {

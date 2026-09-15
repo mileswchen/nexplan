@@ -22,7 +22,7 @@ trail, diffs, conflict-safe parallel work, and real version history for free.
 It is exposed through **three interfaces** that all share the same store:
 
 1. **CLI** — `nexplan …` (humans, scripts).
-2. **MCP server** — `node dist/mcp/server.js` (agents; 36 `nexplan_*` tools).
+2. **MCP server** — `node dist/mcp/server.js` (agents; 39 `nexplan_*` tools).
 3. **Web dashboard** — `nexplan web` (humans; kanban board, bug tracker, doc viewer/history,
    projects/users admin panel). Humans authenticate with a password; anonymous visitors can
    only **read** open projects.
@@ -122,13 +122,15 @@ board directory for a single command.
 
 | Command | Description |
 |---|---|
-| `nexplan add "<title>" [options]` | Add one work item. `--type`, `--priority`, `--description`, `--assignee`, `--tags a,b`, `--estimate n`, `--fixes-bug BUG-1,BUG-2`, `--doc-link url`, `--manual`, `--json-input` (read items from stdin as JSON). |
-| `nexplan list` / `ls` | List work items. `--status`, `--type`, `--priority`, `--assignee`, `--tags`, `--query`, `--limit`. |
-| `nexplan get <id>` | Full detail of one item (incl. notes, children, links). |
+| `nexplan add "<title>" [options]` | Add one work item. `--type`, `--priority`, `--description`, `--assignee`, `--tags a,b`, `--estimate n`, `--fixes-bug BUG-1,BUG-2`, `--doc-link url`, `--parent WI-1` (file it as a subtask), `--manual`, `--json-input` (read items from stdin as JSON). |
+| `nexplan list` / `ls` | List work items. `--status`, `--type`, `--priority`, `--assignee`, `--tags`, `--query`, `--parent WI-1\|top`, `--depth 1..3`, `--tree` (show the attached tree), `--limit`. |
+| `nexplan tree [<id>]` | Print the decomposition tree with connectors and progress rollups (`--depth n` limits printing). Without an id it prints the whole forest. |
+| `nexplan get <id>` | Full detail of one item (incl. notes, links, the parent chain and its subtasks). |
 | `nexplan claim <id> --assignee <name>` | Take ownership: sets `assignee` and status to `in_progress`. Optional `--status`. |
 | `nexplan update <id> [options]` | Edit fields: `--title`, `--description`, `--type`, `--priority`, `--status`, `--assignee`, `--tags`, `--estimate`, `--doc-link url` (leave empty to clear). |
 | `nexplan done <id> [options]` (`complete`) | Mark done; `--note`, `--no-close-bugs`. Auto-closes bugs listed in `fixesBug`. |
-| `nexplan decompose <parentId> --child "<title>" …` | Split a parent into child backlog items (linked to the parent). |
+| `nexplan decompose <parentId> --child "<title>" --child "<title>"` | Split a parent into child backlog items (linked to the parent on both sides). Capped at 3 levels. |
+| `nexplan move <id> [--parent WI-1]` | Re-attach an item (and its subtree) under another parent; omit `--parent` (or pass `none`) to promote it to the top level. Cycles and >3 levels are refused. |
 | `nexplan note <id> <body>` | Append a progress/context note. |
 | `nexplan rm <id>` (`delete`) | Delete a work item. Only its creator or an admin can delete it. |
 
@@ -137,9 +139,35 @@ board directory for a single command.
 ```bash
 nexplan add "实现下单接口" --type feature --priority P0
 nexplan decompose WI-2 --child "订单表结构" --child "下单 API"
+nexplan add "补充索引" --parent WI-3        # file a sub-subtask under WI-3
+nexplan tree WI-2                            # see the attachment + progress
 nexplan claim WI-3 --assignee opencode
 nexplan done WI-3 --note "完成并验证"
 ```
+
+#### Task hierarchy
+
+Work items form a tree of at most **3 levels**: task → subtask → sub-subtask.
+
+```
+WI-1  P1  in_progress  [feature]  Ship v1        ↳ 1/2 done
+├─ WI-2  P2  done  [task]  Build API
+└─ WI-3  P2  backlog  [task]  Write docs         ↳ 0/1 done
+   └─ WI-4  P2  backlog  [task]  Publish changelog
+```
+
+* Every item stores both sides of the link (`parent` and `children`), written in one
+  transaction — deleting a parent with children is refused, and deleting a child
+  detaches it from its parent.
+* `nexplan list --parent WI-1` lists one item's subtasks; `--parent top` lists the
+  top-level tasks; `--depth 3` lists only sub-subtasks.
+* Completing a parent whose subtasks are still open is allowed, but the fact is
+  recorded in its notes and returned as `verification.childrenOpen`.
+* In the web dashboard, subtask cards show a breadcrumb back to their parent plus a
+  `2/3 done` badge, the item dialog has a **Subtasks** section (add one inline, jump
+  to any child, re-parent the item), and the **Board / Tree** switch renders the full
+  attachment. Nodes deeper than 3 levels (hand-written data) still display, flagged
+  as “Beyond level 3”.
 
 ### Bugs
 
@@ -237,6 +265,8 @@ command; it defaults to the workspace's default project.
 | `nexplan project list` | List projects. |
 | `nexplan project new <key> [--name n] [--description d] [--members a,b]` | Create a project. |
 | `nexplan project use <key>` | Set the workspace default project. |
+| `nexplan project update <key> [--key newKey] [--name n] [--description d] [--members a,b]` | Change the key and/or the display fields. The key is the data directory name, so renaming moves the whole project (work items, bugs, docs, test cases, runs, archive bundles). |
+| `nexplan project rename <key> <newKey>` | Shortcut for renaming just the key. |
 | `nexplan project show <key>` | Show project details. |
 | `nexplan project rm <key>` | Delete a project (not the default). |
 
@@ -317,19 +347,21 @@ A cross-agent overview: [`docs/AGENTS.md`](AGENTS.md).
 > If an agent can’t load MCP servers, it can drive the exact same board by shelling
 > out to the `nexplan` CLI (Step 5).
 
-### The 36 tools
+### The 39 tools
 
 Most tools accept an optional `project` argument (defaults to `$NEXPLAN_PROJECT` or
 the workspace default).
 
 | Tool | Purpose |
 |---|---|
-| `nexplan_backlog_add` | Enter a task / decomposed subtask into the backlog |
-| `nexplan_backlog_list` / `nexplan_backlog_get` | Read the backlog (filter/single) |
+| `nexplan_backlog_add` | Enter a task / decomposed subtask into the backlog (`parent` attaches it directly) |
+| `nexplan_backlog_list` / `nexplan_backlog_get` | Read the backlog (filters, `parent`, `depth`, `tree: true`) |
+| `nexplan_backlog_tree` | Read the decomposition tree: one item's subtree, or a filtered forest with rollups |
 | `nexplan_backlog_claim` | Take an item: assign + `in_progress` |
 | `nexplan_backlog_complete` | Mark done; optionally auto-close linked bugs |
 | `nexplan_backlog_update` | Edit any field (incl. status) |
-| `nexplan_backlog_decompose` | Split a parent item into child backlog items |
+| `nexplan_backlog_decompose` | Split a parent item into child backlog items (max 3 levels) |
+| `nexplan_backlog_move` | Re-attach an item under another parent, or promote it to the top level |
 | `nexplan_backlog_note` | Append a progress/context note |
 | `nexplan_backlog_delete` | Delete an item (its creator or an admin only) |
 | `nexplan_docs_list` / `nexplan_docs_get` | Read design/decision docs |
@@ -348,6 +380,7 @@ the workspace default).
 | `nexplan_status` | Board summary + recent activity |
 | `nexplan_agent_next` | Suggest the next item to pick up |
 | `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | Manage projects |
+| `nexplan_project_update` | Rename a project key (its data moves with it) and/or edit the name, description, members |
 | `nexplan_user_list` / `nexplan_user_add` / `nexplan_user_update` | Manage users (roles) |
 
 Every write tool accepts an **`author`** argument and, where relevant, a
@@ -378,6 +411,13 @@ initial password `admin`; it is forced to **change the password on first login**
 shows `name (role)` and a **Log out** button. Anonymous visitors can **read** open
 projects, but every write and management action requires a login — API errors are
 surfaced as a toast.
+
+The **summary chips** in the header are drill-down buttons: **Work items** opens the
+whole backlog, each status chip (Backlog / Done / …) opens exactly those items on the
+board, **Bugs** opens the bug tracker, **Test cases** the test list, **Passing /
+Failing** the cases whose latest run ended that way, and **Docs** the document list.
+Clicking a chip resets that tab's filters first, so the list always matches the number
+you clicked.
 
 The dashboard has these tabs:
 

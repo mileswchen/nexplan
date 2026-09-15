@@ -76,6 +76,68 @@ describe('projects', () => {
     const keys = (await ws.listProjects()).map((p) => p.key);
     expect(keys).not.toContain('rmme');
   });
+
+  it('updates a project name and description', async () => {
+    await ws.createProject({ key: 'api', name: 'API' });
+    const renamed = await ws.updateProject('api', { name: 'API v2', description: 'Rewritten' });
+    expect(renamed.name).toBe('API v2');
+    expect(renamed.description).toBe('Rewritten');
+    expect((await ws.getProject('api'))?.name).toBe('API v2');
+    await expect(ws.updateProject('nope', { name: 'x' })).rejects.toThrow(/not found/);
+  });
+
+  it('renames a project key and moves every record with it', async () => {
+    await ws.createProject({ key: 'old', name: 'Old name' });
+    const store = ws.getStore('old');
+    const item = await store.createWorkItem({ title: 'Keep me' });
+    await store.createBug({ title: 'A bug' });
+    await store.createTestCase({ title: 'A case', workItem: item.id });
+
+    const renamed = await ws.renameProjectKey('old', 'new');
+    expect(renamed.key).toBe('new');
+    expect(renamed.name).toBe('Old name'); // display fields survive a key change
+    const keys = (await ws.listProjects()).map((p) => p.key);
+    expect(keys).toContain('new');
+    expect(keys).not.toContain('old');
+    expect(await ws.getProject('old')).toBeNull();
+    // The data is under the new key, ids and links intact.
+    const moved = await ws.getStore('new');
+    expect((await moved.listWorkItems()).map((w) => w.title)).toEqual(['Keep me']);
+    expect((await moved.listBugs()).map((b) => b.title)).toEqual(['A bug']);
+    expect((await moved.listTestCases({})).map((c) => c.workItem)).toEqual([item.id]);
+    // The rename is one committed workspace action, so it shows up in history.
+    const history = await new Git(dir).logAll(5);
+    expect(history.some((c) => c.message.includes('rename old → new'))).toBe(true);
+  });
+
+  it('follows a renamed project with the default pointer and rejects bad renames', async () => {
+    await ws.createProject({ key: 'focus', name: 'Focus' });
+    await ws.setDefaultProject('focus');
+    await ws.renameProjectKey('focus', 'main');
+    expect(await ws.getDefaultProjectKey()).toBe('main');
+    expect(await ws.resolveProject()).toBe('main');
+
+    await ws.createProject({ key: 'other' });
+    await expect(ws.renameProjectKey('main', 'other')).rejects.toThrow(/exists/);
+    await expect(ws.renameProjectKey('main', 'bad key')).rejects.toThrow(/invalid/);
+    await expect(ws.renameProjectKey('ghost', 'x')).rejects.toThrow(/not found/);
+    // Renaming to the same key is a no-op, not an error.
+    expect((await ws.renameProjectKey('main', 'main')).key).toBe('main');
+  });
+
+  it('renames the key and the display fields in one call', async () => {
+    await ws.createProject({ key: 'api', name: 'API' });
+    const p = await ws.updateProjectFull('api', { newKey: 'backend', name: 'Backend API' });
+    expect(p.key).toBe('backend');
+    expect(p.name).toBe('Backend API');
+    const keys = (await ws.listProjects()).map((x) => x.key);
+    expect(keys).toContain('backend');
+    expect(keys).not.toContain('api');
+    // A name-only patch keeps the key.
+    const same = await ws.updateProjectFull('backend', { name: 'Renamed again' });
+    expect(same.key).toBe('backend');
+    expect(same.name).toBe('Renamed again');
+  });
 });
 
 describe('users', () => {
