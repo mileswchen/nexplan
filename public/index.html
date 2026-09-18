@@ -211,7 +211,7 @@
   <div class="proj"><span class="muted" data-i18n="proj_label">Project</span><select id="project-select"></select></div>
   <div class="chips" id="chips"></div>
   <div class="tabs">
-    <button class="tab active" data-tab="board" data-i18n="tab_board">Board</button>
+    <button class="tab active" data-tab="board" data-i18n="tab_board">Work items</button>
     <button class="tab" data-tab="bugs" data-i18n="tab_bugs">Bugs</button>
     <button class="tab" data-tab="tests" data-i18n="tab_tests">Tests</button>
     <button class="tab" data-tab="docs" data-i18n="tab_docs">Docs</button>
@@ -347,7 +347,7 @@ const esc = (s) => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':
 const I18N = {
   en: {
     title: 'NexPlan Project Management',
-    proj_label: 'Project', tab_board: 'Board', tab_bugs: 'Bugs', tab_tests: 'Tests', tab_docs: 'Docs', tab_admin: 'Admin',
+    proj_label: 'Project', tab_board: 'Work items', tab_bugs: 'Bugs', tab_tests: 'Tests', tab_docs: 'Docs', tab_admin: 'Admin',
     refresh: 'Refresh', search_wi_ph: 'Search title/description…',
     all_priorities: 'All priorities', all_assignees: 'All assignees', new_item: '+ New work item',
     search_bug_ph: 'Search bugs…', all_severities: 'All severities', all_statuses: 'All statuses',
@@ -432,7 +432,7 @@ const I18N = {
   },
   zh: {
     title: 'NexPlan 项目管理',
-    proj_label: '项目', tab_board: '待办板', tab_bugs: '缺陷', tab_tests: '测试', tab_docs: '文档', tab_admin: '管理',
+    proj_label: '项目', tab_board: '工作项', tab_bugs: '缺陷', tab_tests: '测试', tab_docs: '文档', tab_admin: '管理',
     refresh: '刷新', search_wi_ph: '搜索标题/描述…',
     all_priorities: '全部优先级', all_assignees: '全部负责人', new_item: '+ 新建待办',
     search_bug_ph: '搜索缺陷…', all_severities: '全部级别', all_statuses: '全部状态',
