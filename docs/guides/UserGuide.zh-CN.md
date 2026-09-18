@@ -118,13 +118,15 @@ nexplan web
 
 | 命令 | 说明 |
 |---|---|
-| `nexplan add "<标题>" [选项]` | 新增一个工作项。`--type`、`--priority`、`--description`、`--assignee`、`--tags a,b`、`--estimate n`、`--fixes-bug BUG-1,BUG-2`、`--doc-link url`、`--manual`、`--json-input`（从 stdin 读 JSON 数组批量新增）。 |
-| `nexplan list` / `ls` | 列出工作项。`--status`、`--type`、`--priority`、`--assignee`、`--tags`、`--query`、`--limit`。 |
-| `nexplan get <id>` | 单条完整详情（含备注、子项、关联）。 |
+| `nexplan add "<标题>" [选项]` | 新增一个工作项。`--type`、`--priority`、`--description`、`--assignee`、`--tags a,b`、`--estimate n`、`--fixes-bug BUG-1,BUG-2`、`--doc-link url`、`--parent WI-1`（直接作为子任务挂接）、`--manual`、`--json-input`（从 stdin 读 JSON 数组批量新增）。 |
+| `nexplan list` / `ls` | 列出工作项。`--status`、`--type`、`--priority`、`--assignee`、`--tags`、`--query`、`--parent WI-1\|top`、`--depth 1..3`、`--tree`（按挂接关系显示）、`--limit`。 |
+| `nexplan tree [<id>]` | 打印分解树：带连接线与进度汇总（`--depth n` 限制打印层数）。不带 id 时打印整片森林。 |
+| `nexplan get <id>` | 单条完整详情（含备注、关联、上级链路与子任务）。 |
 | `nexplan claim <id> --assignee <名字>` | 认领：设置 `assignee` 并把状态置为 `in_progress`。可选 `--status`。 |
 | `nexplan update <id> [选项]` | 编辑字段：`--title`、`--description`、`--type`、`--priority`、`--status`、`--assignee`、`--tags`、`--estimate`、`--doc-link url`（留空清除）。 |
 | `nexplan done <id> [选项]`（`complete`） | 标记完成；`--note`、`--no-close-bugs`。自动关闭 `fixesBug` 中的缺陷。 |
-| `nexplan decompose <父ID> --child "<标题>" …` | 把父项拆分成子 backlog 项（与父项关联）。 |
+| `nexplan decompose <父ID> --child "<标题>" --child "<标题>"` | 把父项拆分成子 backlog 项（父子两侧同时写入）。最多 3 层。 |
+| `nexplan move <id> [--parent WI-1]` | 重新挂接（连同其子树）到其他父项；省略 `--parent`（或传 `none`）即提升为顶层。成环与超过 3 层会被拒绝。 |
 | `nexplan note <id> <内容>` | 追加进度 / 上下文备注。 |
 | `nexplan rm <id>`（`delete`） | 删除工作项。仅创建者或管理员可删除。 |
 
@@ -133,9 +135,33 @@ nexplan web
 ```bash
 nexplan add "实现下单接口" --type feature --priority P0
 nexplan decompose WI-2 --child "订单表结构" --child "下单 API"
+nexplan add "补充索引" --parent WI-3        # 在 WI-3 下再挂一个子子任务
+nexplan tree WI-2                            # 查看挂接关系与进度
 nexplan claim WI-3 --assignee opencode
 nexplan done WI-3 --note "完成并验证"
 ```
+
+#### 任务与子任务（3 层）
+
+工作项构成一棵最多 **3 层**的树：任务 → 子任务 → 子子任务。
+
+```
+WI-1  P1  in_progress  [feature]  Ship v1        ↳ 1/2 done
+├─ WI-2  P2  done  [task]  Build API
+└─ WI-3  P2  backlog  [task]  Write docs         ↳ 0/1 done
+   └─ WI-4  P2  backlog  [task]  Publish changelog
+```
+
+* 每条工作项同时保存挂接关系的两侧（`parent` 与 `children`），并在同一个事务里写入 ——
+  因此不会只写一半；删除仍有子项的父项会被拒绝，删除子项会自动从父项摘除。
+* `nexplan list --parent WI-1` 列出某条的子任务；`--parent top` 列出顶层任务；
+  `--depth 3` 只列出子子任务。
+* 在子任务未完成时完成父项是允许的，但会写入父项备注，并在返回值中给出
+  `verification.childrenOpen`。
+* Web 看板上，子任务卡片会显示回到父项的面包屑与 `2/3 已完成` 徽标；条目弹窗里有
+  **子任务**区块（可就地添加子任务、跳转到任一子项、改挂接上级）；**看板 / 树形**
+  切换可查看完整挂接关系。超过 3 层的历史数据（手写或旧版本写入）仍会显示，并标注
+  “超出 3 层”。
 
 ### 缺陷
 
@@ -227,6 +253,8 @@ nexplan docs history "下单设计"
 | `nexplan project list` | 列出项目。 |
 | `nexplan project new <key> [--name n] [--description d] [--members a,b]` | 创建项目。 |
 | `nexplan project use <key>` | 设置为默认项目。 |
+| `nexplan project update <key> [--key 新key] [--name n] [--description d] [--members a,b]` | 修改 key 与名称等字段。key 同时是数据目录名，改名会连同整份项目数据（工作项、缺陷、文档、用例、执行记录、归档包）一起迁移。 |
+| `nexplan project rename <key> <新key>` | 只改 key 的快捷写法。 |
 | `nexplan project show <key>` | 显示项目详情。 |
 | `nexplan project rm <key>` | 删除项目（不能删默认项目）。 |
 
@@ -301,18 +329,20 @@ env:
 
 > 如果某个 Agent 无法加载 MCP server，它也可以直接 shell 调用 `nexplan` CLI（第 5 节）。
 
-### 36 个工具
+### 39 个工具
 
 多数工具都接受可选的 `project` 参数（默认取 `$NEXPLAN_PROJECT` 或工作区默认项目）。
 
 | 工具 | 用途 |
 |---|---|
-| `nexplan_backlog_add` | 把任务 / 分解子任务录入 backlog |
-| `nexplan_backlog_list` / `nexplan_backlog_get` | 读取 backlog（列表 / 单条） |
+| `nexplan_backlog_add` | 把任务 / 分解子任务录入 backlog（`parent` 可直接挂接） |
+| `nexplan_backlog_list` / `nexplan_backlog_get` | 读取 backlog（过滤、`parent`、`depth`、`tree: true`） |
+| `nexplan_backlog_tree` | 读取分解树：单个条目的子树，或带汇总的过滤森林 |
 | `nexplan_backlog_claim` | 认领一条 item：指派 + `in_progress` |
 | `nexplan_backlog_complete` | 标记完成；可选自动关闭关联缺陷 |
 | `nexplan_backlog_update` | 编辑任意字段（含状态） |
-| `nexplan_backlog_decompose` | 把父项拆成子 backlog 项 |
+| `nexplan_backlog_decompose` | 把父项拆成子 backlog 项（最多 3 层） |
+| `nexplan_backlog_move` | 重新挂接到其他父项，或提升为顶层 |
 | `nexplan_backlog_note` | 追加进度 / 上下文备注 |
 | `nexplan_backlog_delete` | 删除条目（仅创建者或管理员） |
 | `nexplan_docs_list` / `nexplan_docs_get` | 读取设计 / 决策文档 |
@@ -331,6 +361,7 @@ env:
 | `nexplan_status` | 看板汇总 + 近期活动 |
 | `nexplan_agent_next` | 建议下一个要处理的事项 |
 | `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | 项目管理 |
+| `nexplan_project_update` | 重命名项目 key（数据随之迁移）及修改名称 / 描述 / 成员 |
 | `nexplan_user_list` / `nexplan_user_add` / `nexplan_user_update` | 用户与角色管理 |
 
 每个写工具都接受一个 **`author`** 参数，涉及项目时还接受 **`project`** 参数。设置
@@ -376,9 +407,16 @@ LAN 地址（对外暴露前请先改掉默认 `admin` 密码！）。界面**�
   预览的内联编辑器；**新建文档** 创建文档。
 - **管理** —— 项目统计与项目管理（见下）。
 
-顶部栏的**项目切换器**可切换活动项目。**管理**标签页新增**项目统计**面板（各项目的
-待办/缺陷/文档数量，点卡片直接进入），以及项目与用户管理（新建/删除项目、设默认、改角色、
-加用户——加用户表单里有给人类用户填的“密码（可选）”字段、严格权限开关）。
+顶部栏的**项目切换器**可切换活动项目，标签页前的**统计徽标可以点击下钻**：
+「工作项」打开全部工作项，各状态徽标（待办 / 完成 / …）在看板上只显示该状态的数据，
+「缺陷」进入缺陷列表，「测试用例」进入用例列表，「通过 / 失败」按最近一次执行结果筛选，
+「文档」进入文档列表。点击徽标会先清空该标签页的筛选条件，因此列表数量与徽标数字一致。
+
+**管理**标签页包含**项目统计**面板（各项目的待办/缺陷/文档数量，点卡片直接进入），以及
+项目与用户管理：**项目的 key 与名称可直接在表格里修改并保存**（key 同时是数据目录名，
+改名会连同该项目全部数据一起迁移；也可点「设为默认」把某个项目设为工作区默认），新建/
+删除项目、改用户角色、加用户（加用户表单里有给人类用户填的“密码（可选）”字段）、
+严格权限开关。
 
 看板每 15 秒自动刷新，并在每次操作后刷新。Web 登录会话有效期为 7 天
 （签名 `nexplan_session` cookie）。

@@ -1,4 +1,14 @@
-import { WorkItem, Bug, Doc, TestCaseWithStatus, TestRun, TestReport } from '../core/types.js';
+import {
+  WorkItem,
+  WorkItemNode,
+  WorkItemPath,
+  Bug,
+  Doc,
+  TestCaseWithStatus,
+  TestRun,
+  TestReport,
+  MAX_WORK_ITEM_DEPTH,
+} from '../core/types.js';
 
 const c = {
   bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
@@ -79,6 +89,46 @@ export function formatWorkItemFull(w: WorkItem): string {
     for (const n of w.notes) out.push(`    ${date(n.at)} ${n.author}: ${n.body}`);
   }
   return out.join('\n');
+}
+
+/** "WI-1 › WI-4 › WI-9" — where an item hangs, root first. */
+export function formatWorkItemPath(path: WorkItemPath): string {
+  const chain = [...path.ancestors, path.item];
+  return `in: ${chain.map((a) => a.id).join(' › ')}  (level ${path.depth}/${MAX_WORK_ITEM_DEPTH})`;
+}
+
+/**
+ * Render a decomposition forest with connector lines:
+ *
+ *   WI-1  P1  in_progress  [feature]  Ship v1  ↳ 1/2 done
+ *   ├─ WI-2  P2  done  [task]  Build API
+ *   └─ WI-3  P2  backlog  [task]  Write docs
+ *
+ * `maxDepth` limits printing only (1 = roots alone); nodes deeper than the
+ * 3-level cap are printed with a warning marker.
+ */
+export function formatWorkItemTree(nodes: WorkItemNode[], opts: { maxDepth?: number } = {}): string {
+  const maxDepth = opts.maxDepth ?? Infinity;
+  const lines: string[] = [];
+  const progress = (n: WorkItemNode) => {
+    const p = n.childProgress;
+    if (!p.total) return '';
+    return c.dim(`  ↳ ${p.done}/${p.total} done`);
+  };
+  const walk = (n: WorkItemNode, prefix: string, isLast: boolean, isRoot: boolean) => {
+    const connector = isRoot ? '' : c.dim(prefix + (isLast ? '└─ ' : '├─ '));
+    const flags = [
+      n.overCap ? c.red(`  [beyond ${MAX_WORK_ITEM_DEPTH} levels]`) : '',
+      n.matched === false ? c.dim('  ·context') : '',
+    ].join('');
+    lines.push(connector + formatWorkItem(n) + progress(n) + flags);
+    if (n.depth >= maxDepth) return;
+    const kids = n.childNodes;
+    const childPrefix = isRoot ? '' : prefix + (isLast ? '   ' : '│  ');
+    kids.forEach((k, idx) => walk(k, childPrefix, idx === kids.length - 1, false));
+  };
+  nodes.forEach((n) => walk(n, '', true, true));
+  return lines.join('\n');
 }
 
 export function formatBug(b: Bug): string {

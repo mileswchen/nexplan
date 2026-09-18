@@ -253,8 +253,11 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<http.
   app.patch('/api/projects/:key', async (req, res, next) => {
     try {
       await workspace.assertAdmin(requireLogin(req).id);
-      const { name, description, members } = req.body;
-      res.json(await workspace.updateProject(req.params.key, { name, description, members }));
+      // `newKey` renames the project (and moves its data directory); the other
+      // fields are display metadata. The response carries the resulting key so
+      // the dashboard can follow the rename.
+      const { newKey, name, description, members } = req.body;
+      res.json(await workspace.updateProjectFull(req.params.key, { newKey, name, description, members }));
     } catch (e) {
       next(e);
     }
@@ -323,17 +326,23 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<http.
   app.get('/api/workitems', async (req, res, next) => {
     try {
       const store = await storeFor(req);
-      const { status, type, priority, assignee, tags, query, limit } = req.query;
-      const items = await store.listWorkItems({
+      const { status, type, priority, assignee, tags, query, limit, parent, depth, tree } = req.query;
+      const filter = {
         status: status ? String(status).split(',') : undefined,
         type: type ? String(type).split(',') : undefined,
         priority: priority ? String(priority).split(',') : undefined,
         assignee: assignee ? String(assignee) : undefined,
         tags: tags ? String(tags).split(',') : undefined,
         query: query ? String(query) : undefined,
+        // `parent=top` asks for top-level items; `parent=WI-3` for its subtasks.
+        parent: parent === undefined ? undefined : String(parent) === 'top' ? null : String(parent),
+        depth: depth ? Number(depth) : undefined,
         limit: limit ? Number(limit) : undefined,
-      } as unknown as ListFilter);
-      res.json(items);
+      } as unknown as ListFilter;
+      // `tree=1` returns the same filter as an attached forest (nodes with
+      // childNodes / childProgress) instead of a flat list.
+      if (tree === '1' || tree === 'true') return res.json(await store.listWorkItemTrees(filter));
+      res.json(await store.listWorkItems(filter));
     } catch (e) {
       next(e);
     }
@@ -341,9 +350,34 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<http.
 
   app.get('/api/workitems/:id', async (req, res, next) => {
     try {
-      const item = await (await storeFor(req)).getWorkItem(req.params.id);
+      const store = await storeFor(req);
+      const item = await store.getWorkItem(req.params.id);
       if (!item) return res.status(404).json({ error: 'work item not found' });
-      res.json(item);
+      // Derived hierarchy context: breadcrumb, direct subtasks and rollups, so
+      // the detail view renders the attachment relation in one round trip.
+      if (req.query.tree === '1' || req.query.tree === 'true') {
+        const node = await store.getWorkItemTree(req.params.id);
+        return res.json(node);
+      }
+      const path = await store.workItemPath(req.params.id);
+      const children = await store.listWorkItems({ parent: req.params.id });
+      res.json({
+        ...item,
+        depth: path?.depth ?? 1,
+        overCap: path?.overCap ?? false,
+        ancestors: path?.ancestors ?? [],
+        childNodes: children,
+      });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.get('/api/workitems/:id/tree', async (req, res, next) => {
+    try {
+      const node = await (await storeFor(req)).getWorkItemTree(req.params.id);
+      if (!node) return res.status(404).json({ error: 'work item not found' });
+      res.json(node);
     } catch (e) {
       next(e);
     }
@@ -409,6 +443,17 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<http.
     try {
       const { children } = req.body;
       res.json(await (await storeFor(req, true)).decomposeWorkItem(req.params.id, children ?? [], me(req)));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/workitems/:id/move', async (req, res, next) => {
+    try {
+      const { parent } = req.body;
+      // `parent: null` (or omitted) promotes the item to the top level.
+      const target = parent === undefined || parent === '' || parent === 'top' || parent === null ? null : String(parent);
+      res.json(await (await storeFor(req, true)).moveWorkItem(req.params.id, target, me(req)));
     } catch (e) {
       next(e);
     }

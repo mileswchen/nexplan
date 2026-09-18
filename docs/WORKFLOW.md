@@ -26,6 +26,12 @@ If the task is too big, decompose it first, then claim the children:
 nexplan_backlog_decompose { "parentId": "WI-3", "children": [ { "title": "..." }, ... ] }
 ```
 
+Decomposition is capped at **3 levels** (task → subtask → sub-subtask); a level-3 item
+cannot be split further, so record any remaining detail as a note, a test case or a
+design doc instead. Read the hierarchy back with `nexplan_backlog_tree` (`{ "id":
+"WI-3" }` for one subtree, or filters for a forest), and re-attach work that was filed
+in the wrong place with `nexplan_backlog_move { "id": "WI-7", "parent": null }`.
+
 ## 3. Capture design/decision docs as you go
 
 Record the *why* in a versioned document, not just the code:

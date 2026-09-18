@@ -50,19 +50,21 @@ workspace also auto-bootstraps a default `admin` (initial password `admin`, forc
 change on first login), so enabling strict mode
 (`nexplan config set-enforce-permissions true`) can never lock out management.
 
-## The 36 tools
+## The 39 tools
 
 Most tools accept an optional `project` argument (defaults to `NEXPLAN_PROJECT` or the
 workspace default).
 
 | Tool | Purpose |
 |---|---|
-| `nexplan_backlog_add` | Enter a task / decomposed subtask into the backlog |
-| `nexplan_backlog_list` / `nexplan_backlog_get` | Read the backlog (filters) |
+| `nexplan_backlog_add` | Enter a task / decomposed subtask into the backlog (`parent` attaches it directly) |
+| `nexplan_backlog_list` / `nexplan_backlog_get` | Read the backlog (filters, `parent`, `depth`, `tree: true`) |
+| `nexplan_backlog_tree` | Read the decomposition tree: one item's subtree, or a filtered forest with rollups |
 | `nexplan_backlog_claim` | Take an item: assign + `in_progress` |
 | `nexplan_backlog_complete` | Mark done; optionally auto-close linked bugs |
 | `nexplan_backlog_update` | Edit any field (incl. status) |
-| `nexplan_backlog_decompose` | Split a parent item into child backlog items |
+| `nexplan_backlog_decompose` | Split a parent item into child backlog items (max 3 levels) |
+| `nexplan_backlog_move` | Re-attach an item under another parent, or promote it to the top level |
 | `nexplan_backlog_note` | Append a progress/context note |
 | `nexplan_backlog_delete` | Delete an item (its creator or an admin only) |
 | `nexplan_docs_list` / `nexplan_docs_get` | Read design/decision docs |
@@ -81,6 +83,7 @@ workspace default).
 | `nexplan_status` | Board summary + recent activity |
 | `nexplan_agent_next` | Suggest the next thing: severe bug → re-verify a fixed bug whose case still fails → fix a failing case → backlog |
 | `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | Manage projects |
+| `nexplan_project_update` | Rename a project key (its data moves with it) and/or edit the name, description, members |
 | `nexplan_user_list` / `nexplan_user_add` / `nexplan_user_update` | Manage users (roles) |
 
 ## Per-agent config files

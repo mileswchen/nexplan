@@ -46,7 +46,11 @@ import {
   TestRunFilter,
   TestStep,
   DEFAULT_ARCHIVE_POLICY,
+  MAX_WORK_ITEM_DEPTH,
   WorkItem,
+  WorkItemNode,
+  WorkItemPath,
+  WorkItemRollup,
   WorkItemStatus,
   WorkItemType,
   WorkItemVerification,
@@ -123,6 +127,8 @@ const PRIORITY_TO_SEVERITY: Record<Priority, BugSeverity> = {
 
 // A permissive filter spec that applies to both work items and bugs; the
 // concrete `ListFilter` / `BugFilter` types narrow the exposed API.
+// `parent` / `depth` are work-item-only and handled by `listWorkItems` and the
+// tree helpers, which need the full id→item map to resolve them.
 interface FilterSpec {
   status?: string | string[];
   type?: string | string[];
@@ -132,6 +138,11 @@ interface FilterSpec {
   tags?: string[];
   query?: string;
   limit?: number;
+}
+
+/** Tree read options: `maxDepth` may be `Infinity` to materialize legacy deep data. */
+export interface TreeOptions {
+  maxDepth?: number;
 }
 
 class Mutex {
@@ -355,25 +366,42 @@ export class Store {
     author?: string;
   }): Promise<WorkItem> {
     const author = input.author ?? this.agentName;
+    const title = input.title.trim();
+    if (!title) throw new Error('title is required');
     return this.tx(async () => {
       const now = NOW();
+      // Creating directly under a parent keeps both sides of the link in sync
+      // (child.parent and parent.children) exactly like decomposeWorkItem does.
+      let parent: WorkItem | null = null;
+      if (input.parent) {
+        parent = await this.getWorkItem(input.parent);
+        if (!parent) throw new Error(`parent work item not found: ${input.parent}`);
+        const parentPath = await this.workItemPath(input.parent);
+        const parentDepth = parentPath?.depth ?? 1;
+        if (parentDepth >= MAX_WORK_ITEM_DEPTH) {
+          throw new Error(
+            `cannot nest under ${parent.id}: decomposition is limited to ${MAX_WORK_ITEM_DEPTH} levels ` +
+              `and ${parent.id} already sits at level ${parentDepth}`,
+          );
+        }
+      }
       const id = await this.nextId('WI');
       const item: Wi = {
         schema: 'workitem',
         id,
         type: input.type ?? 'task',
-        title: input.title.trim(),
+        title,
         description: input.description?.trim() ?? '',
         status: input.status ?? 'backlog',
-        priority: input.priority ?? 'P2',
+        priority: input.priority ?? parent?.priority ?? 'P2',
         assignee: input.assignee ?? null,
         source: input.source ?? (author === 'user' ? 'manual' : 'agent'),
-        parent: input.parent ?? null,
+        parent: parent?.id ?? null,
         children: [],
-        tags: input.tags ?? [],
+        tags: input.tags ?? [...(parent?.tags ?? [])],
         estimate: input.estimate ?? null,
         fixesBug: input.fixesBug ?? [],
-        docLink: input.docLink ?? null,
+        docLink: input.docLink ?? parent?.docLink ?? null,
         createdBy: author,
         createdAt: now,
         updatedAt: now,
@@ -381,6 +409,14 @@ export class Store {
         notes: [],
       };
       await this.writeJson(this.wiPath(id), item);
+      if (parent) {
+        const updatedParent = {
+          ...parent,
+          children: [...parent.children, id],
+          updatedAt: now,
+        } as WorkItem;
+        await this.writeJson(this.wiPath(parent.id), updatedParent);
+      }
       return item as unknown as WorkItem;
     }, (item) => `workitem: create ${item.id} ${clip(item.title)}`);
   }
@@ -393,7 +429,20 @@ export class Store {
       if (it) items.push(it);
     }
     items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    return this.applyFilter(items, filter);
+    // Parent/depth are resolved against the full item map, so they are applied
+    // before `limit` rather than inside the shared `applyFilter`.
+    const needsMap = filter.parent !== undefined || filter.depth !== undefined;
+    const matched = this.applyFilter(items, needsMap ? { ...filter, limit: undefined } : filter);
+    if (!needsMap) return matched;
+    const byId = new Map(items.map((i) => [i.id, i]));
+    let out = matched;
+    if (filter.parent !== undefined) {
+      out = out.filter((i) => (filter.parent === null ? i.parent === null : i.parent === filter.parent));
+    }
+    if (filter.depth !== undefined) {
+      out = out.filter((i) => this.absoluteDepth(i, byId).depth === filter.depth);
+    }
+    return filter.limit ? out.slice(0, filter.limit) : out;
   }
 
   private applyFilter<T extends { status?: string; type?: string; priority?: string; severity?: string; assignee?: string | null; tags?: string[]; title: string; description: string }>(
@@ -433,11 +482,27 @@ export class Store {
     return (await this.readJson<WorkItem>(this.wiPath(id))) ?? null;
   }
 
+  /**
+   * Patch a work item. The decomposition links (`parent` / `children`) are
+   * guarded: writing them through a raw patch is how a board ends up with one
+   * half of a link — use `moveWorkItem` and `decomposeWorkItem` instead.
+   */
   async updateWorkItem(id: string, patch: Partial<WorkItem>, author?: string): Promise<WorkItem> {
     const existing = await this.getWorkItem(id);
     if (!existing) throw new Error(`work item not found: ${id}`);
+    if (patch.parent !== undefined && patch.parent !== existing.parent) {
+      throw new Error(
+        `cannot change ${id}.parent through update — use moveWorkItem(${id}, ${JSON.stringify(patch.parent)}) ` +
+          'so the old and new parents stay consistent',
+      );
+    }
+    if (patch.children !== undefined && patch.children.join(',') !== existing.children.join(',')) {
+      throw new Error(
+        `cannot rewrite ${id}.children through update — use decomposeWorkItem(${id}, …) or moveWorkItem(child, ${id})`,
+      );
+    }
     const updater = author ?? this.agentName;
-    const updated = { ...existing, ...patch, id, updatedAt: NOW() } as WorkItem;
+    const updated = { ...existing, ...patch, id, parent: existing.parent, children: existing.children, updatedAt: NOW() } as WorkItem;
     // Never allow status to drift away from valid enum via raw patch.
     if (patch.status) updated.status = patch.status;
     return this.tx(async () => {
@@ -483,6 +548,15 @@ export class Store {
         ),
       );
     }
+    if (verification.childrenOpen > 0) {
+      notes.push(
+        this.note(
+          updater,
+          `hierarchy: ${verification.childrenDone}/${verification.childrenTotal} child item(s) done — ` +
+            `still open: ${verification.childrenOpenIds.join(', ')}`,
+        ),
+      );
+    }
     notes.push(this.note(updater, 'complete → done'));
     const updated = {
       ...existing,
@@ -516,6 +590,14 @@ export class Store {
     }, `workitem: complete ${id}`);
   }
 
+  /**
+   * Split a parent item into child backlog items. Both sides of the link are
+   * written in one transaction: each child gets `parent = parentId`, and the
+   * parent gets the new ids appended to `children`.
+   *
+   * Nesting is capped at `MAX_WORK_ITEM_DEPTH` levels, so a level-3 item (a
+   * sub-subtask) cannot be decomposed any further.
+   */
   async decomposeWorkItem(
     parentId: string,
     children: { title: string; type?: WorkItemType; description?: string; priority?: Priority }[],
@@ -523,17 +605,28 @@ export class Store {
   ): Promise<{ parent: WorkItem; children: WorkItem[] }> {
     const parent = await this.getWorkItem(parentId);
     if (!parent) throw new Error(`parent work item not found: ${parentId}`);
+    if (!children.length) throw new Error('provide at least one child');
+    const parentPath = await this.workItemPath(parentId);
+    const parentDepth = parentPath?.depth ?? 1;
+    if (parentDepth >= MAX_WORK_ITEM_DEPTH) {
+      throw new Error(
+        `cannot decompose ${parentId}: it is already at level ${parentDepth} of ${MAX_WORK_ITEM_DEPTH} ` +
+          '— record the remaining detail as a note, a test case or a document instead',
+      );
+    }
     const authorName = author ?? this.agentName;
     return this.tx(async () => {
       const created: WorkItem[] = [];
       for (const c of children) {
+        const title = c.title.trim();
+        if (!title) throw new Error('child title is required');
         const id = await this.nextId('WI');
         const now = NOW();
         const child: Wi = {
           schema: 'workitem',
           id,
           type: c.type ?? 'task',
-          title: c.title.trim(),
+          title,
           description: c.description?.trim() ?? '',
           status: 'backlog',
           priority: c.priority ?? parent.priority,
@@ -610,6 +703,246 @@ export class Store {
       await fs.rm(this.wiPath(id), { force: true });
       return existing;
     }, `workitem: delete ${id}`);
+  }
+
+  // ------------------------------------------------ work item hierarchy (tree)
+
+  /**
+   * Every work item keyed by id — the lookup every hierarchical read needs.
+   * One directory read, no filtering, no sorting.
+   */
+  private async workItemsById(): Promise<Map<string, WorkItem>> {
+    const files = (await this.readDir(this.dirs.workitems)).filter((f) => f.endsWith('.json'));
+    const byId = new Map<string, WorkItem>();
+    for (const f of files) {
+      const it = await this.readJson<WorkItem>(this.wiPath(f.replace(/\.json$/, '')));
+      if (it) byId.set(it.id, it);
+    }
+    return byId;
+  }
+
+  /**
+   * Absolute depth of an item (1 = top level). Cycles and dangling parent ids
+   * terminate the walk instead of hanging the read path.
+   */
+  private absoluteDepth(item: WorkItem, byId: Map<string, WorkItem>): { depth: number; overCap: boolean } {
+    let depth = 1;
+    const seen = new Set<string>([item.id]);
+    let cursor = item.parent;
+    while (cursor && !seen.has(cursor)) {
+      const parent = byId.get(cursor);
+      if (!parent) break; // dangling reference (parent deleted by hand)
+      seen.add(cursor);
+      depth++;
+      cursor = parent.parent;
+    }
+    return { depth, overCap: depth > MAX_WORK_ITEM_DEPTH };
+  }
+
+  /** Levels below an item: 0 for a leaf. Cycle-safe. */
+  private subtreeHeight(id: string, byId: Map<string, WorkItem>, seen: Set<string>): number {
+    const item = byId.get(id);
+    if (!item || seen.has(id)) return 0;
+    const next = new Set(seen);
+    next.add(id);
+    let height = 0;
+    for (const childId of item.children) {
+      height = Math.max(height, 1 + this.subtreeHeight(childId, byId, next));
+    }
+    return height;
+  }
+
+  /** Ancestor chain of an item, root-first, plus its absolute depth. */
+  async workItemPath(id: string): Promise<WorkItemPath | null> {
+    const byId = await this.workItemsById();
+    const item = byId.get(id) ?? (await this.getWorkItem(id));
+    if (!item) return null;
+    byId.set(item.id, item);
+    const ancestors: WorkItem[] = [];
+    const seen = new Set<string>([item.id]);
+    let cursor = item.parent;
+    while (cursor && !seen.has(cursor)) {
+      const parent = byId.get(cursor);
+      if (!parent) break;
+      seen.add(cursor);
+      ancestors.unshift(parent);
+      cursor = parent.parent;
+    }
+    const { depth, overCap } = this.absoluteDepth(item, byId);
+    return { item, ancestors, depth, overCap };
+  }
+
+  private rollup(nodes: WorkItemNode[], deep: boolean): WorkItemRollup {
+    let total = 0;
+    let done = 0;
+    for (const n of nodes) {
+      total += 1;
+      if (n.status === 'done') done += 1;
+      if (deep) {
+        total += n.subtree.total;
+        done += n.subtree.done;
+      }
+    }
+    return { total, done, open: total - done };
+  }
+
+  /**
+   * Materialize one node and its descendants. `matched` is the set of ids the
+   * caller's filter selected (`null` = everything matches); non-matching
+   * descendants are still included so the attachment relation stays readable.
+   */
+  private buildNode(
+    item: WorkItem,
+    byId: Map<string, WorkItem>,
+    ctx: { maxDepth: number; matched: Set<string> | null; ancestors: Set<string> },
+  ): WorkItemNode {
+    const { depth, overCap } = this.absoluteDepth(item, byId);
+    const ancestors = new Set(ctx.ancestors);
+    ancestors.add(item.id);
+    const childNodes: WorkItemNode[] = [];
+    if (depth + 1 <= ctx.maxDepth) {
+      for (const childId of item.children) {
+        if (ancestors.has(childId)) continue; // cycle guard
+        const child = byId.get(childId);
+        if (!child) continue; // dangling child id
+        childNodes.push(this.buildNode(child, byId, { ...ctx, ancestors }));
+      }
+    }
+    return {
+      ...item,
+      depth,
+      overCap,
+      root: false,
+      matched: ctx.matched ? ctx.matched.has(item.id) : true,
+      childNodes,
+      childProgress: this.rollup(childNodes, false),
+      subtree: this.rollup(childNodes, true),
+    };
+  }
+
+  /** One item as a tree node, with its descendants. `maxDepth` caps the read. */
+  async getWorkItemTree(id: string, opts: TreeOptions = {}): Promise<WorkItemNode | null> {
+    const byId = await this.workItemsById();
+    const item = byId.get(id) ?? (await this.getWorkItem(id));
+    if (!item) return null;
+    byId.set(item.id, item);
+    const node = this.buildNode(item, byId, {
+      maxDepth: opts.maxDepth ?? Infinity,
+      matched: null,
+      ancestors: new Set(),
+    });
+    return { ...node, root: true };
+  }
+
+  /**
+   * Filtered forest: the roots are the matching items that have no matching
+   * ancestor (so nothing is listed twice), and each root carries its full
+   * subtree as context. Sibling order follows `children`, i.e. creation order.
+   */
+  async listWorkItemTrees(filter: ListFilter = {}, opts: TreeOptions = {}): Promise<WorkItemNode[]> {
+    const byId = await this.workItemsById();
+    const all = [...byId.values()];
+    const prefiltered = this.applyFilter(all, { ...filter, limit: undefined });
+    const matched = new Set(prefiltered.map((i) => i.id));
+    if (filter.parent !== undefined) {
+      for (const id of [...matched]) {
+        const it = byId.get(id)!;
+        const hit = filter.parent === null ? it.parent === null : it.parent === filter.parent;
+        if (!hit) matched.delete(id);
+      }
+    }
+    if (filter.depth !== undefined) {
+      for (const id of [...matched]) {
+        if (this.absoluteDepth(byId.get(id)!, byId).depth !== filter.depth) matched.delete(id);
+      }
+    }
+    const hasMatchedAncestor = (item: WorkItem): boolean => {
+      const seen = new Set<string>([item.id]);
+      let cursor = item.parent;
+      while (cursor && !seen.has(cursor)) {
+        if (matched.has(cursor)) return true;
+        const parent = byId.get(cursor);
+        if (!parent) break;
+        seen.add(cursor);
+        cursor = parent.parent;
+      }
+      return false;
+    };
+    const roots = all
+      .filter((i) => matched.has(i.id) && !hasMatchedAncestor(i))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+    const nodes = roots.map((r) =>
+      this.buildNode(r, byId, { maxDepth: opts.maxDepth ?? Infinity, matched, ancestors: new Set() }),
+    );
+    const withRoots = nodes.map((n) => ({ ...n, root: true }));
+    return filter.limit ? withRoots.slice(0, filter.limit) : withRoots;
+  }
+
+  /**
+   * Re-attach an item (and its subtree) under another parent, or promote it to
+   * the top level with `newParent = null`. Refuses cycles and anything that
+   * would push the subtree past `MAX_WORK_ITEM_DEPTH`.
+   */
+  async moveWorkItem(id: string, newParent: string | null, author?: string): Promise<WorkItem> {
+    const byId = await this.workItemsById();
+    const item = byId.get(id);
+    if (!item) throw new Error(`work item not found: ${id}`);
+    if (newParent === id) throw new Error(`cannot make ${id} its own parent`);
+    if (item.parent === newParent) return item; // nothing to do
+    const updater = author ?? this.agentName;
+
+    let target: WorkItem | null = null;
+    if (newParent) {
+      target = byId.get(newParent) ?? null;
+      if (!target) throw new Error(`parent work item not found: ${newParent}`);
+      // The new parent must not live inside the moving subtree.
+      const seen = new Set<string>();
+      let cursor: string | null = target.id;
+      while (cursor && !seen.has(cursor)) {
+        if (cursor === id) throw new Error(`cannot move ${id} under ${newParent}: that would create a cycle`);
+        seen.add(cursor);
+        cursor = byId.get(cursor)?.parent ?? null;
+      }
+      const targetDepth = this.absoluteDepth(target, byId).depth;
+      const height = this.subtreeHeight(id, byId, new Set());
+      if (targetDepth + 1 + height > MAX_WORK_ITEM_DEPTH) {
+        throw new Error(
+          `cannot move ${id} under ${newParent}: the subtree is ${height + 1} level(s) deep and ` +
+            `${newParent} already sits at level ${targetDepth} (limit ${MAX_WORK_ITEM_DEPTH})`,
+        );
+      }
+    }
+
+    const now = NOW();
+    const from = item.parent;
+    const note = this.note(
+      updater,
+      target ? `moved from ${from ?? '(top level)'} under ${target.id}` : `detached from ${from} → top level`,
+    );
+    const updated = { ...item, parent: target?.id ?? null, updatedAt: now, notes: [...item.notes, note] } as WorkItem;
+
+    return this.tx(async () => {
+      if (from) {
+        const oldParent = byId.get(from);
+        if (oldParent) {
+          await this.writeJson(this.wiPath(oldParent.id), {
+            ...oldParent,
+            children: oldParent.children.filter((c) => c !== id),
+            updatedAt: now,
+          } as WorkItem);
+        }
+      }
+      if (target) {
+        const fresh = (await this.getWorkItem(target.id)) ?? target;
+        await this.writeJson(this.wiPath(target.id), {
+          ...fresh,
+          children: fresh.children.includes(id) ? fresh.children : [...fresh.children, id],
+          updatedAt: now,
+        } as WorkItem);
+      }
+      await this.writeJson(this.wiPath(id), updated);
+      return updated;
+    }, `workitem: move ${id} → ${target?.id ?? 'top level'}`);
   }
 
   // --------------------------------------------------------------------- bugs
@@ -1458,7 +1791,8 @@ export class Store {
 
   /**
    * Verification summary for a work item: how its active test cases last
-   * executed. Informational — the optional blocking gate lives in `Workspace`.
+   * executed, plus the decomposition rollup over its direct children.
+   * Informational — the optional blocking gate lives in `Workspace`.
    */
   async verificationForWorkItem(id: string): Promise<WorkItemVerification> {
     const cases = (await this.listTestCases({ workItem: id }, { withLastRun: false })).filter(
@@ -1469,7 +1803,20 @@ export class Store {
     for (const run of runs.slice().sort(compareRunsDesc)) {
       if (!latest.has(run.caseId)) latest.set(run.caseId, run);
     }
-    const result: WorkItemVerification = { cases: cases.length, pass: 0, fail: 0, notRun: 0, failing: [], notRunCases: [] };
+    const children = await this.listWorkItems({ parent: id });
+    const childrenOpen = children.filter((c) => c.status !== 'done');
+    const result: WorkItemVerification = {
+      cases: cases.length,
+      pass: 0,
+      fail: 0,
+      notRun: 0,
+      failing: [],
+      notRunCases: [],
+      childrenTotal: children.length,
+      childrenDone: children.length - childrenOpen.length,
+      childrenOpen: childrenOpen.length,
+      childrenOpenIds: childrenOpen.map((c) => c.id),
+    };
     for (const c of cases) {
       const run = latest.get(c.id);
       if (!run) {

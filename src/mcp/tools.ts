@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Workspace } from '../core/workspace.js';
+import { MAX_WORK_ITEM_DEPTH } from '../core/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 // `as const` tuples keep zod's inferred types as literal unions, which match the
@@ -81,6 +82,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     priority: priorities.optional().describe('P0..P3. Default: P2.'),
     assignee: z.string().nullish(),
     source: z.enum(['manual', 'agent']).optional(),
+    parent: z.string().optional().describe('Parent work item id — creates this item as its subtask.'),
     tags: z.array(z.string()).optional(),
     estimate: z.number().nullish().describe('Story points / hours.'),
     fixesBug: z.array(z.string()).optional().describe('Bug ids this item will fix.'),
@@ -93,6 +95,9 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
       title: 'Add backlog items',
       description:
         'Add one or more work items to the backlog. Use this to enter decomposed tasks. ' +
+        'Set `parent` to attach an item directly under another one, or `nexplan_backlog_decompose` ' +
+        `to split an item into several subtasks at once. Decomposition is limited to ` +
+        `${MAX_WORK_ITEM_DEPTH} levels (task → subtask → sub-subtask). ` +
         'Set `author` to your agent name for attribution. `project` selects the project.',
       inputSchema: z.object({
         items: z.array(addItemSchema).min(1),
@@ -120,7 +125,10 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     'nexplan_backlog_list',
     {
       title: 'List backlog items',
-      description: 'List/filter work items in the backlog.',
+      description:
+        'List/filter work items in the backlog. Flattened list by default; pass `tree: true` to get ' +
+        'the same filter as an attached forest where each node carries `depth`, `childNodes`, ' +
+        '`childProgress` and `subtree` rollups.',
       inputSchema: z.object({
         status: z.union([itemStatuses, z.array(itemStatuses)]).optional(),
         type: z.union([itemTypes, z.array(itemTypes)]).optional(),
@@ -128,13 +136,82 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
         assignee: z.string().optional(),
         tags: z.array(z.string()).optional(),
         query: z.string().optional().describe('Substring match on title/description.'),
+        parent: z.string().optional().describe('Only the subtasks of this item; "top" for top-level items.'),
+        depth: z.number().int().positive().optional().describe('Only items at this absolute depth (1..3).'),
+        tree: z.boolean().optional().describe('Return the attached tree instead of a flat list.'),
         limit: z.number().int().positive().optional(),
         project: projectOpt,
       }),
     },
     async (args) => {
       const { store } = await projectStore(workspace, args);
-      return ok(await store.listWorkItems(args as never));
+      const { tree, parent, ...rest } = args;
+      const filter = {
+        ...rest,
+        parent: parent === undefined ? undefined : parent === 'top' ? null : parent,
+      } as never;
+      if (tree) return ok(await store.listWorkItemTrees(filter));
+      return ok(await store.listWorkItems(filter));
+    },
+  );
+
+  server.registerTool(
+    'nexplan_backlog_tree',
+    {
+      title: 'Show the decomposition tree',
+      description:
+        `Return work items as an attached tree (task → subtask → sub-subtask, max ${MAX_WORK_ITEM_DEPTH} levels). ` +
+        'Pass `id` for one item: the response is that node with `childNodes` and rollups. ' +
+        'Omit `id` to get a forest of the items matching the filters, each with its subtree as context ' +
+        '(`matched: false` marks context nodes pulled in only to keep the attachment visible).',
+      inputSchema: z.object({
+        id: z.string().optional().describe('Work item id, e.g. WI-3. Omit for a filtered forest.'),
+        status: z.union([itemStatuses, z.array(itemStatuses)]).optional(),
+        type: z.union([itemTypes, z.array(itemTypes)]).optional(),
+        priority: z.union([priorities, z.array(priorities)]).optional(),
+        assignee: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+        query: z.string().optional(),
+        parent: z.string().optional().describe('Only the subtasks of this item; "top" for top-level items.'),
+        depth: z.number().int().positive().optional().describe('Only items at this absolute depth (1..3).'),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      const { id, project: _p, parent, ...rest } = args;
+      if (id) {
+        const node = await store.getWorkItemTree(id);
+        if (!node) throw new Error(`work item not found: ${id}`);
+        const path = await store.workItemPath(id);
+        return ok({ ...node, ancestors: path?.ancestors ?? [], path: path ? [...path.ancestors.map((a) => a.id), id] : [id] });
+      }
+      const filter = {
+        ...rest,
+        parent: parent === undefined ? undefined : parent === 'top' ? null : parent,
+      } as never;
+      return ok(await store.listWorkItemTrees(filter));
+    },
+  );
+
+  server.registerTool(
+    'nexplan_backlog_move',
+    {
+      title: 'Re-attach a backlog item',
+      description:
+        'Move a work item (and its whole subtree) under another parent, or promote it to the top level ' +
+        'with `parent: null`. Refuses cycles and anything that would exceed ' +
+        `${MAX_WORK_ITEM_DEPTH} levels. Both sides of the link are updated together.`,
+      inputSchema: z.object({
+        id: z.string().describe('Work item id, e.g. WI-4.'),
+        parent: z.string().nullish().describe('New parent id; null/omitted promotes the item to the top level.'),
+        author: z.string().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args, { write: true });
+      return ok(await store.moveWorkItem(args.id, args.parent ?? null, actor));
     },
   );
 
@@ -234,7 +311,10 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     'nexplan_backlog_decompose',
     {
       title: 'Decompose a backlog item',
-      description: 'Split a parent item into child backlog items (linked to the parent).',
+      description:
+        'Split a parent item into child backlog items (linked to the parent: the child gets `parent`, ' +
+        `the parent gets the child id in \`children\`). Maximum ${MAX_WORK_ITEM_DEPTH} levels deep — ` +
+        'a level-3 sub-subtask cannot be decomposed any further.',
       inputSchema: z.object({
         parentId: z.string(),
         children: z
@@ -556,6 +636,40 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
     async (args) => {
       await workspace.assertAdmin(args.author ?? 'agent');
       return ok(await workspace.createProject({ key: args.key, name: args.name, description: args.description, members: args.members }));
+    },
+  );
+
+  server.registerTool(
+    'nexplan_project_update',
+    {
+      title: 'Update a project',
+      description:
+        'Update a project: rename its key (the data directory moves with it, so every work item, ' +
+        'bug, doc and test record follows) and/or change its display name, description or member roster. ' +
+        'The old key stops resolving once the rename succeeds.',
+      inputSchema: z.object({
+        key: z.string().describe('Current project key.'),
+        newKey: z
+          .string()
+          .regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/)
+          .optional()
+          .describe('New project key ([a-zA-Z0-9_-]). Omit to keep the current one.'),
+        name: z.string().optional().describe('Display name.'),
+        description: z.string().optional(),
+        members: z.array(z.string()).optional().describe('Replaces the member roster when given.'),
+        author: z.string().optional(),
+      }),
+    },
+    async (args) => {
+      await workspace.assertAdmin(args.author ?? 'agent');
+      return ok(
+        await workspace.updateProjectFull(args.key, {
+          newKey: args.newKey,
+          name: args.name,
+          description: args.description,
+          members: args.members,
+        }),
+      );
     },
   );
 

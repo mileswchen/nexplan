@@ -48,18 +48,20 @@ Agent **永远不需要密码** —— Web 登录密码只给人类看板用户�
 首次登录强制改密），所以开启严格模式（`nexplan config set-enforce-permissions true`）
 永远不会把管理权限锁死。
 
-## 36 个工具
+## 39 个工具
 
 多数工具接受可选的 `project` 参数（默认取 `NEXPLAN_PROJECT` 或工作区默认项目）。
 
 | 工具 | 用途 |
 |---|---|
-| `nexplan_backlog_add` | 把任务 / 分解子任务录入 backlog |
-| `nexplan_backlog_list` / `nexplan_backlog_get` | 读取 backlog（带过滤）|
+| `nexplan_backlog_add` | 把任务 / 分解子任务录入 backlog（`parent` 可直接挂到父项下）|
+| `nexplan_backlog_list` / `nexplan_backlog_get` | 读取 backlog（过滤、`parent`、`depth`、`tree: true`）|
+| `nexplan_backlog_tree` | 读取分解树：单个条目的子树，或带汇总的过滤森林 |
 | `nexplan_backlog_claim` | 认领：指派 + `in_progress` |
 | `nexplan_backlog_complete` | 标记完成；可选自动关闭关联缺陷 |
 | `nexplan_backlog_update` | 编辑任意字段（含状态）|
-| `nexplan_backlog_decompose` | 把父项拆成子 backlog 项 |
+| `nexplan_backlog_decompose` | 把父项拆成子 backlog 项（最多 3 层）|
+| `nexplan_backlog_move` | 重新挂接到其他父项，或提升为顶层 |
 | `nexplan_backlog_note` | 追加进度 / 上下文备注 |
 | `nexplan_backlog_delete` | 删除条目（仅创建者或管理员）|
 | `nexplan_docs_list` / `nexplan_docs_get` | 读取设计 / 决策文档 |
@@ -78,6 +80,7 @@ Agent **永远不需要密码** —— Web 登录密码只给人类看板用户�
 | `nexplan_status` | 看板汇总 + 近期活动 |
 | `nexplan_agent_next` | 建议下一步：严重缺陷 → 用例仍失败但缺陷已 fixed（去复验）→ 有失败用例（去修）→ 待办项 |
 | `nexplan_project_list` / `nexplan_project_create` / `nexplan_project_set_default` | 项目管理 |
+| `nexplan_project_update` | 重命名项目 key（数据随之迁移）及修改名称 / 描述 / 成员 |
 | `nexplan_user_list` / `nexplan_user_add` / `nexplan_user_update` | 用户与角色管理 |
 
 ## 各 Agent 配置

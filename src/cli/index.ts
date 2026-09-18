@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { Store } from '../core/store.js';
 import { Workspace } from '../core/workspace.js';
 import { getBoardRoot } from '../core/paths.js';
-import { BugFilter, ListFilter, TestCaseFilter, TestReportFilter, TestRunFilter } from '../core/types.js';
+import { BugFilter, ListFilter, MAX_WORK_ITEM_DEPTH, TestCaseFilter, TestReportFilter, TestRunFilter } from '../core/types.js';
 import {
   formatBug,
   formatBugFull,
@@ -17,6 +17,8 @@ import {
   formatTestRun,
   formatWorkItem,
   formatWorkItemFull,
+  formatWorkItemPath,
+  formatWorkItemTree,
 } from './format.js';
 
 const program = new Command();
@@ -88,6 +90,7 @@ program
   .option('--estimate <n>', 'Estimate (points/hours).')
   .option('--fixes-bug <ids>', 'Comma-separated bug ids this item fixes.')
   .option('--doc-link <url>', 'URL of the design document for this item.')
+  .option('--parent <id>', 'Create this item as a subtask of the given work item.')
   .option('--manual', 'Mark source as manual (human-entered).')
   .option('--json-input', 'Read a JSON array of items from stdin instead of flags.')
   .action(async (title: string | undefined, opts: Record<string, string>) => {
@@ -111,6 +114,7 @@ program
         estimate: opts.estimate ? Number(opts.estimate) : undefined,
         fixesBug: split(opts.fixesBug),
         docLink: opts.docLink,
+        parent: opts.parent,
         source,
       });
     }
@@ -128,36 +132,78 @@ program
   .command('list')
   .alias('ls')
   .description('List work items.')
-  .option('--status <s>', 'Filter by status (repeatable).')
+  .option('--status <s>', 'Filter by status (repeatable).', collect, [])
   .option('--type <t>', 'Filter by type.')
   .option('--priority <p>', 'Filter by priority.')
   .option('--assignee <name>', 'Filter by assignee.')
   .option('--tags <tags>', 'Filter by tags (comma-separated).')
   .option('--query <q>', 'Full-text substring filter.')
+  .option('--parent <id>', 'Only the subtasks of this item ("top" for top-level items).')
+  .option('--depth <n>', 'Only items at this absolute depth (1..3).')
+  .option('--tree', 'Show the attached decomposition tree instead of a flat list.')
   .option('--limit <n>', 'Max results.')
-  .action(async (opts: Record<string, string>) => {
-    const items = await (await store()).listWorkItems({
-      status: opts.status ? [opts.status] : undefined,
+  .action(async (opts: Record<string, string | boolean>) => {
+    const filter = {
+      status: asArray(opts.status).length ? asArray(opts.status) : undefined,
       type: opts.type,
       priority: opts.priority,
       assignee: opts.assignee,
-      tags: split(opts.tags),
+      tags: split(opts.tags as string),
       query: opts.query,
+      parent: opts.parent === undefined ? undefined : opts.parent === 'top' ? null : opts.parent,
+      depth: opts.depth ? Number(opts.depth) : undefined,
       limit: opts.limit ? Number(opts.limit) : undefined,
-    } as ListFilter);
+    } as ListFilter;
+    const store0 = await store();
+    if (opts.tree) {
+      const forest = await store0.listWorkItemTrees(filter);
+      if (program.opts().json) return printJson(forest);
+      if (!forest.length) return out('(no work items)\n');
+      return out(formatWorkItemTree(forest) + '\n');
+    }
+    const items = await store0.listWorkItems(filter);
     if (program.opts().json) return printJson(items);
     if (!items.length) return out('(no work items)\n');
     for (const w of items) out(formatWorkItem(w) + '\n');
   });
 
 program
+  .command('tree [id]')
+  .description('Show work items as a decomposition tree (task → subtask → sub-subtask).')
+  .option('--depth <n>', 'Print at most this many levels per root.')
+  .action(async (id: string | undefined, opts: Record<string, string>) => {
+    const s = await store();
+    const maxDepth = opts.depth ? Number(opts.depth) : undefined;
+    if (id) {
+      const node = await s.getWorkItemTree(id);
+      if (!node) throw new Error(`work item not found: ${id}`);
+      if (program.opts().json) return printJson(node);
+      const p = await s.workItemPath(id);
+      if (p && p.ancestors.length) out(formatWorkItemPath(p) + '\n');
+      return out(formatWorkItemTree([node], { maxDepth }) + '\n');
+    }
+    const forest = await s.listWorkItemTrees();
+    if (program.opts().json) return printJson(forest);
+    if (!forest.length) return out('(no work items)\n');
+    out(formatWorkItemTree(forest, { maxDepth }) + '\n');
+  });
+
+program
   .command('get <id>')
   .description('Show a work item in full.')
   .action(async (id: string) => {
-    const w = await (await store()).getWorkItem(id);
+    const s = await store();
+    const w = await s.getWorkItem(id);
     if (!w) throw new Error(`work item not found: ${id}`);
     if (program.opts().json) return printJson(w);
+    const path = await s.workItemPath(id);
+    if (path && path.ancestors.length) process.stdout.write(formatWorkItemPath(path) + '\n\n');
     process.stdout.write(formatWorkItemFull(w) + '\n');
+    // Show how the item's own subtasks are doing, if it has any.
+    if (w.children.length) {
+      const tree = await s.getWorkItemTree(id);
+      if (tree) process.stdout.write('\nsubtasks:\n' + formatWorkItemTree(tree.childNodes) + '\n');
+    }
   });
 
 program
@@ -226,9 +272,21 @@ program
   });
 
 program
+  .command('move <id>')
+  .description('Re-attach a work item under another parent (or promote it to the top level).')
+  .option('--parent <id>', 'New parent id; omit or pass "none"/"top" to make it top-level.')
+  .action(async (id: string, opts: Record<string, string>) => {
+    const raw = opts.parent;
+    const parent = !raw || raw === 'none' || raw === 'top' ? null : raw;
+    const w = await (await store(true)).moveWorkItem(id, parent);
+    if (program.opts().json) return printJson(w);
+    out(`moved ${w.id} → ${w.parent ?? 'top level'}\n`);
+  });
+
+program
   .command('decompose <parentId>')
-  .description('Split a parent item into child backlog items.')
-  .option('--child <title>', 'Child title (repeatable).')
+  .description(`Split a parent item into child backlog items (max ${MAX_WORK_ITEM_DEPTH} levels deep).`)
+  .option('--child <title>', 'Child title (repeatable).', collect, [])
   .action(async (parentId: string, opts: Record<string, string[] | string>) => {
     const children = (typeof opts.child === 'string' ? [opts.child] : opts.child ?? []).map((t) => ({ title: t }));
     if (!children.length) throw new Error('provide at least one --child');
@@ -490,30 +548,31 @@ testCmd
   });
 
 testCmd
-  .command('add <title>')
-  .description('Create a test case.')
+  .command('add [title]')
+  .description('Create a test case (or a batch of them with --json-input).')
   .option('--description <text>', 'Purpose / scope.')
   .option('--type <t>', 'functional|regression|integration|e2e|performance|security|usability|other.')
   .option('--priority <p>', 'P0..P3.')
   .option('--status <s>', 'draft|active|deprecated.', 'active')
   .option('--precondition <text>', 'Preconditions.')
-  .option('--step <step>', 'Repeatable step as "action|expected result".')
+  .option('--step <step>', 'Repeatable step as "action|expected result".', collect, [])
   .option('--work-item <id>', 'Work item this case verifies.')
-  .option('--bug <id>', 'Bug this case guards (repeatable).')
-  .option('--tag <t>', 'Tag (repeatable).')
+  .option('--bug <id>', 'Bug this case guards (repeatable).', collect, [])
+  .option('--tag <t>', 'Tag (repeatable).', collect, [])
   .option('--automated', 'Mark as automated.')
   .option('--test-file <locator>', 'Automation locator, e.g. "test/store.test.ts::claims an item".')
   .option('--json-input', 'Read one or more cases as a JSON array from stdin.')
-  .action(async (title: string, opts: Record<string, string | string[] | boolean>) => {
+  .action(async (title: string | undefined, opts: Record<string, string | string[] | boolean>) => {
     const s = await store(true);
     const created = [];
+    if (!opts.jsonInput && !title) throw new Error('provide a title or --json-input');
     if (opts.jsonInput) {
       const parsed = JSON.parse(await readStdin());
       for (const item of Array.isArray(parsed) ? parsed : [parsed]) created.push(await s.createTestCase(item));
     } else {
       created.push(
         await s.createTestCase({
-          title,
+          title: title as string,
           description: opts.description as string,
           type: opts.type as never,
           priority: opts.priority as never,
@@ -824,6 +883,35 @@ projectCmd
   });
 
 projectCmd
+  .command('update <key>')
+  .description('Update a project: change its key (renames the data directory) and/or its display fields.')
+  .option('--key <newKey>', 'New project key ([a-zA-Z0-9_-]); moves projects/<key> to the new name.')
+  .option('--name <name>', 'Display name.')
+  .option('--description <text>', 'Description.')
+  .option('--members <ids>', 'Comma-separated user ids (empty string clears the roster).')
+  .action(async (key: string, opts: Record<string, string>) => {
+    await requireAdmin();
+    const p = await (await workspace()).updateProjectFull(key, {
+      newKey: opts.key,
+      name: opts.name,
+      description: opts.description,
+      members: opts.members === undefined ? undefined : split(opts.members),
+    });
+    if (program.opts().json) return printJson(p);
+    out(`updated project ${p.key} — ${p.name}${p.key !== key ? ` (renamed from ${key})` : ''}\n`);
+  });
+
+projectCmd
+  .command('rename <key> <newKey>')
+  .description('Rename a project key (the data directory moves with it).')
+  .action(async (key: string, newKey: string) => {
+    await requireAdmin();
+    const p = await (await workspace()).renameProjectKey(key, newKey);
+    if (program.opts().json) return printJson(p);
+    out(`renamed project ${key} → ${p.key}\n`);
+  });
+
+projectCmd
   .command('use <key>')
   .description('Set the default project.')
   .action(async (key: string) => {
@@ -1019,6 +1107,14 @@ function split(value: string | undefined): string[] | undefined {
 }
 
 /** Commander collects repeated options into an array, but a single use stays a string. */
+/**
+ * Commander only turns a repeated option into an array when it is given a
+ * parser — without one, `--child A --child B` silently keeps just "B".
+ */
+function collect(value: string, previous: string[] = []): string[] {
+  return [...previous, value];
+}
+
 function asArray(value: string | string[] | boolean | undefined): string[] {
   if (value === undefined || typeof value === 'boolean') return [];
   return Array.isArray(value) ? value : [value];

@@ -43,12 +43,13 @@ env:
   NEXPLAN_AGENT:  dsh
 ```
 
-The 28 `nexplan_*` tools then appear in dsh's tool list.
+The 39 `nexplan_*` tools then appear in dsh's tool list.
 
 ## Recommended habit for dsh
 
 1. Enter the parent feature with `nexplan add`.
-2. Decompose it with `nexplan decompose <id> --child …`.
+2. Decompose it with `nexplan decompose <id> --child …` (max 3 levels; check the
+   attachment any time with `nexplan tree <id>`).
 3. `nexplan agent-next` (via CLI: `nexplan list --status backlog --priority P0`
    or a small wrapper) to find the next item.
 4. Record design/decision docs with `nexplan docs new|update`.

@@ -214,12 +214,7 @@ export class Workspace {
 
   async createProject(input: { key: string; name?: string; description?: string; members?: string[] }): Promise<Project> {
     const key = input.key.trim();
-    if (!key || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(key)) {
-      throw new Error(`invalid project key: "${key}" (use [a-zA-Z0-9_-])`);
-    }
-    if (key === DEFAULT_PROJECT_KEY && (await this.rootHasBoard())) {
-      throw new Error('project key "default" is reserved for the workspace root board');
-    }
+    await this.assertUsableProjectKey(key);
     if (await this.getProject(key)) throw new Error(`project already exists: ${key}`);
     const project = this.makeProject(
       key,
@@ -238,6 +233,16 @@ export class Workspace {
     return project;
   }
 
+  /** A key must be usable as a directory name under `projects/`. */
+  private async assertUsableProjectKey(key: string): Promise<void> {
+    if (!key || !/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(key)) {
+      throw new Error(`invalid project key: "${key}" (use [a-zA-Z0-9_-])`);
+    }
+    if (key === DEFAULT_PROJECT_KEY && (await this.rootHasBoard())) {
+      throw new Error('project key "default" is reserved for the workspace root board');
+    }
+  }
+
   async updateProject(
     key: string,
     patch: { name?: string; description?: string; members?: string[] },
@@ -254,6 +259,56 @@ export class Workspace {
     await this.writeJson(path.join(this.projectDir(key), 'project.json'), updated);
     await this.commitMeta(`project: update ${key}`);
     return updated;
+  }
+
+  /**
+   * Change a project's key. The key doubles as the directory name, so this moves
+   * `projects/<old>` to `projects/<new>` with all of its data — work items, bugs,
+   * docs, test cases, runs, archive bundles, per-project test-policy overrides —
+   * and lets git record it as a rename rather than a delete + add. The
+   * default-project pointer follows along.
+   */
+  async renameProjectKey(oldKey: string, newKeyInput: string): Promise<Project> {
+    const newKey = newKeyInput.trim();
+    const existing = await this.getProject(oldKey);
+    if (!existing) throw new Error(`project not found: ${oldKey}`);
+    if (newKey === oldKey) return existing;
+    await this.assertUsableProjectKey(newKey);
+    if (await this.getProject(newKey)) throw new Error(`project already exists: ${newKey}`);
+    const from = this.projectDir(oldKey);
+    const to = this.projectDir(newKey);
+    if (await this.exists(to)) throw new Error(`cannot rename ${oldKey} → ${newKey}: ${to} already exists`);
+
+    await fs.rename(from, to);
+    const updated: Project = { ...existing, key: newKey, updatedAt: NOW() };
+    await this.writeJson(path.join(to, 'project.json'), updated);
+
+    const cfg = await this.loadConfig();
+    cfg.projects = cfg.projects.map((k) => (k === oldKey ? newKey : k));
+    if (!cfg.projects.includes(newKey)) cfg.projects.push(newKey);
+    if (cfg.defaultProject === oldKey) cfg.defaultProject = newKey;
+    await this.writeJson(path.join(this.root, 'workspace.json'), cfg);
+
+    // Drop the cached store: it is rooted at the old path.
+    this.stores.delete(oldKey);
+    this.stores.delete(newKey);
+    await this.commitAll(`project: rename ${oldKey} → ${newKey}`);
+    return updated;
+  }
+
+  /**
+   * Rename the key and/or update the display fields in one call. Both are admin
+   * operations; the order matters because the key change moves the directory.
+   */
+  async updateProjectFull(
+    key: string,
+    patch: { newKey?: string; name?: string; description?: string; members?: string[] },
+  ): Promise<Project> {
+    let current = key;
+    if (patch.newKey !== undefined && patch.newKey.trim() && patch.newKey.trim() !== key) {
+      current = (await this.renameProjectKey(key, patch.newKey)).key;
+    }
+    return this.updateProject(current, patch);
   }
 
   async deleteProject(key: string): Promise<void> {

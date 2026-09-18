@@ -34,6 +34,10 @@
   .chip { background: var(--panel2); border: 1px solid var(--border); border-radius: 999px;
     padding: 4px 10px; font-size: 12px; }
   .chip b { color: var(--accent); }
+  /* Summary chips double as drill-down buttons: click one to see exactly those records. */
+  button.chip { font-family: inherit; color: var(--text); cursor: pointer; }
+  button.chip:hover { border-color: var(--accent); background: var(--panel); }
+  button.chip:active { transform: translateY(1px); }
   .tabs { display: flex; gap: 6px; margin-left: auto; }
   .tab { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 7px 16px;
     border-radius: 999px; cursor: pointer; font-size: 13px; }
@@ -59,6 +63,36 @@
   .card .id { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--accent); }
   .card .title { margin: 4px 0; font-weight: 500; line-height: 1.35; }
   .card .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 5px; }
+  /* ---- decomposition (task → subtask → sub-subtask) ---- */
+  .card.lvl2 { border-left: 3px solid var(--cyan); }
+  .card.lvl3 { border-left: 3px solid var(--magenta); }
+  .crumb { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 11px;
+    color: var(--muted); margin-bottom: 3px; }
+  .crumb a { color: var(--accent); cursor: pointer; text-decoration: none; }
+  .crumb a:hover { text-decoration: underline; }
+  .crumb .sep { color: var(--muted); }
+  .subbadge { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: rgba(55,182,214,.16);
+    color: var(--cyan); }
+  .subbadge.all { background: rgba(63,185,80,.16); color: var(--green); }
+  .subbadge.over { background: rgba(242,84,91,.16); color: var(--red); }
+  .seg { display: flex; gap: 0; }
+  .seg .btn { border-radius: 0; }
+  .seg .btn:first-child { border-radius: 8px 0 0 8px; }
+  .seg .btn:last-child { border-radius: 0 8px 8px 0; }
+  .seg .btn.active { border-color: var(--accent); color: var(--accent); }
+  .tree { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; }
+  .tree-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 8px;
+    cursor: pointer; }
+  .tree-row:hover { background: var(--panel2); }
+  .tree-row .id { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--accent); }
+  .tree-row .glyph { color: var(--muted); font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .tree-row .t-title { font-weight: 500; }
+  .tree-row.ctx { opacity: .62; }
+  .tree-row .grow { flex: 1; }
+  .hier-item { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 10px; margin-bottom: 6px; cursor: pointer; }
+  .hier-item:hover { border-color: var(--accent); }
+  .hier-item.lvl3 { border-left: 3px solid var(--magenta); }
   .badge { padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 600; }
   .pri-P0 { background: rgba(242,84,91,.16); color: var(--red); }
   .pri-P1 { background: rgba(245,185,66,.16); color: var(--yellow); }
@@ -115,6 +149,9 @@
   .modal.wide { width: 860px; }
   .modal h3 { margin: 0 0 10px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  /* Dialog footer: actions sit bottom-right, destructive first. */
+  .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    justify-content: flex-end; margin-top: 16px; }
   .note { border-left: 2px solid var(--accent); padding: 6px 10px; margin: 6px 0; background: var(--panel2);
     border-radius: 0 6px 6px 0; font-size: 13px; }
   .note .who { color: var(--muted); font-size: 12px; }
@@ -122,9 +159,17 @@
   .hidden { display: none !important; }
   .diff { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
     white-space: pre-wrap; font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
-  table.admin { width: 100%; border-collapse: collapse; }
-  table.admin th, table.admin td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  /* Admin tables are editable and must never overlap a sibling panel, so the
+     panels stack and each table scrolls inside its own box. */
+  .stack { display: grid; grid-template-columns: 1fr; gap: 16px; }
+  .table-scroll { overflow-x: auto; }
+  table.admin { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  table.admin th, table.admin td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border);
+    vertical-align: middle; overflow-wrap: anywhere; }
   table.admin th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  table.admin input[type=text].cell { width: 100%; min-width: 0; padding: 5px 8px; font-size: 13px; }
+  table.admin input[type=text].cell.key { font-family: ui-monospace, Menlo, monospace; }
+  table.admin td.actions { white-space: nowrap; }
   #toast { position: fixed; top: 16px; right: 16px; z-index: 999; max-width: 380px;
     background: var(--panel2); border: 1px solid var(--red); color: var(--text); padding: 10px 14px;
     border-radius: 8px; font-size: 13px; box-shadow: 0 4px 18px rgba(0,0,0,.4); display: none;
@@ -188,13 +233,25 @@
   <section id="view-board">
     <div class="toolbar">
       <input id="q" data-i18n-ph="search_wi_ph" placeholder="Search title/description…" />
+      <select id="filter-status"><option value="" data-i18n="all_statuses_wi">All statuses</option>
+        <option value="backlog" data-i18n="st_backlog">Backlog</option>
+        <option value="todo" data-i18n="st_todo">Todo</option>
+        <option value="in_progress" data-i18n="st_in_progress">In progress</option>
+        <option value="review" data-i18n="st_review">In review</option>
+        <option value="done" data-i18n="st_done">Done</option>
+        <option value="blocked" data-i18n="st_blocked">Blocked</option></select>
       <select id="filter-priority"><option value="" data-i18n="all_priorities">All priorities</option>
         <option>P0</option><option>P1</option><option>P2</option><option>P3</option></select>
       <select id="filter-assignee"><option value="" data-i18n="all_assignees">All assignees</option></select>
+      <div class="seg" id="board-view">
+        <button class="btn sm" id="view-kanban" data-i18n="board_view_kanban">Board</button>
+        <button class="btn sm" id="view-tree" data-i18n="board_view_tree">Tree</button>
+      </div>
       <div class="spacer"></div>
       <button class="btn primary" id="new-item" data-i18n="new_item">+ New work item</button>
     </div>
     <div class="board" id="board"></div>
+    <div class="tree hidden" id="board-tree"></div>
   </section>
 
   <!-- BUGS -->
@@ -257,16 +314,20 @@
       <h2 data-i18n="archive_title">Test run archive</h2>
       <div id="archive-panel" style="margin-top:8px"></div>
     </div>
-    <div class="grid2">
+    <div class="stack">
       <div class="panel">
-        <h2 data-i18n="projects">Projects</h2>
-        <button class="btn primary sm" id="new-project" data-i18n="new_project">+ New project</button>
-        <table class="admin" style="margin-top:10px" id="project-table"></table>
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0" data-i18n="projects">Projects</h2>
+          <button class="btn primary sm" id="new-project" data-i18n="new_project">+ New project</button>
+        </div>
+        <div class="table-scroll" style="margin-top:10px"><table class="admin" id="project-table"></table></div>
       </div>
       <div class="panel">
-        <h2 data-i18n="users">Users</h2>
-        <button class="btn primary sm" id="new-user" data-i18n="new_user">+ Add user</button>
-        <table class="admin" style="margin-top:10px" id="user-table"></table>
+        <div class="row" style="justify-content:space-between">
+          <h2 style="margin:0" data-i18n="users">Users</h2>
+          <button class="btn primary sm" id="new-user" data-i18n="new_user">+ Add user</button>
+        </div>
+        <div class="table-scroll" style="margin-top:10px"><table class="admin" id="user-table"></table></div>
       </div>
     </div>
   </section>
@@ -299,6 +360,17 @@ const I18N = {
     w_status: 'Status', w_claim: 'Start / Claim', w_complete: 'Mark done', w_notes: 'Notes',
     w_no_notes: 'No notes', w_note_ph: 'Add a note…', w_note_add: 'Add', close: 'Close',
     w_delete: 'Delete', confirm_del_wi: 'Delete item {x}?',
+    hier_parent: 'Parent task', hier_top: 'Top level (no parent)', hier_subtasks: 'Subtasks',
+    hier_no_subtasks: 'No subtasks yet', hier_sub_ph: 'Add a subtask…', hier_sub_add: 'Add',
+    hier_move: 'Move', hier_progress: '{a}/{b} done', hier_level: 'Level {n}',
+    hier_cap: 'Decomposition stops at 3 levels', hier_open_children: 'Open: {x}',
+    hier_over_cap: 'Beyond level 3', board_view_kanban: 'Board', board_view_tree: 'Tree',
+    hier_children_open: 'Subtask {x} still open',
+    chip_drill_title: 'Click to see these records',
+    all_statuses_wi: 'All statuses',
+    col_key: 'Key', col_edit: 'Edit',
+    proj_edit_hint: 'The key is also the data directory name (letters, digits, - and _ only). Renaming it moves all of this project\'s data.',
+    proj_renamed: 'Renamed {a} → {b}',
     claim_prompt: 'Assignee (agent or user):', complete_prompt: 'Completion note:',
     bug_mark_fixed: 'Mark fixed', bug_empty: 'No bugs', bug_severity: 'Severity',
     bug_status: 'Status', bug_evidence: 'Evidence', save: 'Save',
@@ -373,6 +445,17 @@ const I18N = {
     w_status: '状态', w_claim: '开始 / 认领', w_complete: '标记完成', w_notes: '备注',
     w_no_notes: '暂无备注', w_note_ph: '添加备注…', w_note_add: '添加', close: '关闭',
     w_delete: '删除', confirm_del_wi: '删除待办 {x} ？',
+    hier_parent: '上级任务', hier_top: '顶层（无上级）', hier_subtasks: '子任务',
+    hier_no_subtasks: '暂无子任务', hier_sub_ph: '添加子任务…', hier_sub_add: '添加',
+    hier_move: '移动', hier_progress: '{a}/{b} 已完成', hier_level: '第 {n} 层',
+    hier_cap: '最多分解 3 层', hier_open_children: '未完成：{x}',
+    hier_over_cap: '超出 3 层', board_view_kanban: '看板', board_view_tree: '树形',
+    hier_children_open: '子任务 {x} 未完成',
+    chip_drill_title: '点击查看对应数据',
+    all_statuses_wi: '全部状态',
+    col_key: 'Key', col_edit: '编辑',
+    proj_edit_hint: 'key 同时是数据目录名（仅限字母、数字、- 和 _）。改名会连同该项目的全部数据一起迁移。',
+    proj_renamed: '已重命名 {a} → {b}',
     claim_prompt: '认领人（agent 或 user）：', complete_prompt: '完成备注：',
     bug_mark_fixed: '标记已修', bug_empty: '暂无缺陷', bug_severity: '级别',
     bug_status: '状态', bug_evidence: '证据', save: '保存',
@@ -491,9 +574,23 @@ async function initProjects() {
   const w = await api.get('/api/workspace');
   const sel = $('#project-select');
   sel.innerHTML = w.projects.map(p => `<option value="${esc(p.key)}" ${p.key===w.currentProject?'selected':''}>${esc(p.name)} (${esc(p.key)})</option>`).join('');
-  project = w.currentProject || (w.projects[0] && w.projects[0].key) || 'default';
+  const keys = w.projects.map(p => p.key);
+  // Keep the user's current selection when it still exists (it may have been renamed).
+  if (!keys.includes(project)) project = w.currentProject || keys[0] || 'default';
   sel.value = project;
   sel.onchange = () => { project = sel.value; refresh(); };
+}
+
+/**
+ * One summary chip. Every chip is a drill-down button: `drill` names the tab to
+ * open and the filter that reproduces exactly the number shown on the chip.
+ */
+function chip(label, value, drill) {
+  const attrs = Object.entries(drill || {})
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => ` data-${k}="${esc(v)}"`)
+    .join('');
+  return `<button type="button" class="chip" data-drill="1"${attrs} title="${esc(t('chip_drill_title'))}">${label} <b>${value}</b></button>`;
 }
 
 async function loadSummary() {
@@ -502,30 +599,140 @@ async function loadSummary() {
   const wTotal = keys.reduce((a,[k,v]) => a+v, 0);
   const bTotal = board.bugs ? Object.values(board.bugs).reduce((a,v)=>a+v,0) : 0;
   $('#chips').innerHTML =
-    `<span class="chip">${t('chips_wi')} <b>${wTotal}</b></span>` +
-    keys.map(([k,v]) => `<span class="chip">${statusLabel(k)} <b>${v}</b></span>`).join('') +
-    `<span class="chip">${t('chips_bugs')} <b>${bTotal}</b></span>` +
-    `<span class="chip">${t('chips_tests')} <b>${board.totalTestCases||0}</b></span>` +
-    (board.tests ? `<span class="chip">${t('chips_pass')} <b>${board.tests.pass||0}</b></span>` +
-      `<span class="chip">${t('chips_fail')} <b>${board.tests.fail||0}</b></span>` : '') +
-    `<span class="chip">${t('chips_docs')} <b>${board.docs||0}</b></span>`;
+    chip(t('chips_wi'), wTotal, {tab:'board'}) +
+    keys.map(([k,v]) => chip(statusLabel(k), v, {tab:'board', status:k})).join('') +
+    chip(t('chips_bugs'), bTotal, {tab:'bugs'}) +
+    chip(t('chips_tests'), board.totalTestCases||0, {tab:'tests'}) +
+    (board.tests ? chip(t('chips_pass'), board.tests.pass||0, {tab:'tests', result:'pass'}) +
+      chip(t('chips_fail'), board.tests.fail||0, {tab:'tests', result:'fail'}) : '') +
+    chip(t('chips_docs'), board.docs||0, {tab:'docs'});
+  bindChips();
+}
+
+function bindChips() {
+  document.querySelectorAll('#chips [data-drill]').forEach(el => { el.onclick = () => drillDown(el.dataset); });
+}
+
+/**
+ * Jump from a summary chip to the records behind it: reset that tab's filters so
+ * the list matches the chip's number, then apply the chip's own filter.
+ */
+async function drillDown(d) {
+  if (d.tab === 'board') {
+    $('#q').value = '';
+    $('#filter-priority').value = '';
+    $('#filter-assignee').value = '';
+    $('#filter-status').value = d.status || '';
+  } else if (d.tab === 'bugs') {
+    $('#bq').value = '';
+    $('#b-severity').value = '';
+    $('#b-status').value = '';
+  } else if (d.tab === 'tests') {
+    $('#tq').value = '';
+    $('#t-status').value = '';
+    $('#t-priority').value = '';
+    $('#t-result').value = d.result || '';
+  }
+  // showTab() refreshes; refresh() loads the now-visible tab with the filters above.
+  await showTab(d.tab);
+}
+
+// ---- decomposition: task → subtask → sub-subtask (max 3 levels) ----
+// The board always loads the *attached forest* (`?tree=1`): every node carries
+// depth, parent, childNodes and progress rollups, which is what both the kanban
+// cards and the tree view need to show how tasks hang together.
+const MAX_LEVEL = 3;
+const LS_BOARD_VIEW = 'nexplan_board_view';
+let boardView = localStorage.getItem(LS_BOARD_VIEW) === 'tree' ? 'tree' : 'kanban';
+let boardRoots = [];       // forest roots as returned by the API
+let boardNodeById = new Map(); // every node, for parent/ancestor lookups
+
+function indexBoard(roots) {
+  boardRoots = roots || [];
+  const byId = new Map();
+  const walk = (n) => { byId.set(n.id, n); (n.childNodes || []).forEach(walk); };
+  boardRoots.forEach(walk);
+  boardNodeById = byId;
+  return byId;
+}
+
+/** Ancestors of an item, root-first, limited to what the current board knows. */
+function ancestorsOf(id) {
+  const out = [];
+  const seen = new Set([id]);
+  let cursor = boardNodeById.get(id)?.parent;
+  while (cursor && !seen.has(cursor)) {
+    const parent = boardNodeById.get(cursor);
+    if (!parent) break; // parent filtered out of this view
+    seen.add(cursor);
+    out.unshift(parent);
+    cursor = parent.parent;
+  }
+  return out;
+}
+
+function descendantsOf(id) {
+  const out = new Set();
+  const walk = (n) => { (n.childNodes || []).forEach(c => { out.add(c.id); walk(c); }); };
+  const node = boardNodeById.get(id);
+  if (node) walk(node);
+  return out;
+}
+
+function progressBadge(node) {
+  const p = node.childProgress || { total: 0, done: 0 };
+  if (!p.total) return '';
+  const cls = p.done === p.total ? ' all' : '';
+  return `<span class="subbadge${cls}" title="${esc(t('hier_subtasks'))}">↳ ${esc(fmt('hier_progress', { a: p.done, b: p.total }))}</span>`;
+}
+
+/** "WI-1 › WI-4" breadcrumb showing where a card hangs in the tree. */
+function crumbHtml(node) {
+  if (!node.parent) return '';
+  const chain = ancestorsOf(node.id);
+  if (!chain.length) return '';
+  const parts = chain.map(a => `<a data-jump="${esc(a.id)}">${esc(a.id)}</a>`).join('<span class="sep">›</span>');
+  return `<div class="crumb">${parts}<span class="sep">›</span><span>${esc(node.id)}</span></div>`;
 }
 
 async function loadBoard() {
   const q = $('#q').value.trim();
   const pri = $('#filter-priority').value;
   const asg = $('#filter-assignee').value;
-  const params = new URLSearchParams({ project });
+  const st = $('#filter-status').value;
+  const params = new URLSearchParams({ project, tree: '1' });
   if (q) params.set('query', q);
   if (pri) params.set('priority', pri);
   if (asg) params.set('assignee', asg);
-  const items = await api.get('/api/workitems?' + params.toString());
-  const byStatus = {};
-  for (const s of STATUSES) byStatus[s] = items.filter(i => i.status === s);
-  const assignees = [...new Set(items.map(i => i.assignee).filter(Boolean))];
+  if (st) params.set('status', st);
+  const roots = await api.get('/api/workitems?' + params.toString());
+  renderBoard(roots);
+}
+
+function renderBoard(roots) {
+  indexBoard(roots);
+  const all = [...boardNodeById.values()];
+  const assignees = [...new Set(all.map(i => i.assignee).filter(Boolean))];
   $('#filter-assignee').innerHTML = '<option value="">' + t('all_assignees') + '</option>' +
     assignees.map(a => `<option value="${esc(a)}">@${esc(a)}</option>`).join('');
-  $('#board').innerHTML = STATUSES.map(s => `
+
+  const isTree = boardView === 'tree';
+  $('#board').classList.toggle('hidden', isTree);
+  $('#board-tree').classList.toggle('hidden', !isTree);
+  $('#view-kanban').classList.toggle('active', !isTree);
+  $('#view-tree').classList.toggle('active', isTree);
+  if (isTree) return renderTreeView();
+
+  // Kanban keeps list semantics: only the items the filter matched get a card,
+  // but each card still shows its parent breadcrumb and subtask progress.
+  // With a status filter set, only the matching columns are drawn so the board
+  // shows exactly the records the summary chip counted.
+  const statusFilter = $('#filter-status').value;
+  const columns = statusFilter ? STATUSES.filter(s => s === statusFilter) : STATUSES;
+  const items = all.filter(n => n.matched !== false);
+  const byStatus = {};
+  for (const s of STATUSES) byStatus[s] = items.filter(i => i.status === s);
+  $('#board').innerHTML = columns.map(s => `
     <div class="col">
       <h3>${statusLabel(s)} <span class="count">${byStatus[s].length}</span></h3>
       ${byStatus[s].map(cardHtml).join('') || `<div class="empty">${t('board_empty')}</div>`}
@@ -533,16 +740,51 @@ async function loadBoard() {
   bindCards();
 }
 
-function cardHtml(i) {
-  return `<div class="card" data-id="${esc(i.id)}">
-    <div class="id">${esc(i.id)}</div>
-    <div class="title">${esc(i.title)}</div>
+function renderTreeView() {
+  const rows = [];
+  const walk = (n) => {
+    const level = Math.max(1, Math.min(n.depth || 1, 9));
+    const glyph = level === 1 ? '▸' : (n.childNodes || []).length ? '├─' : '└─';
+    rows.push(`<div class="tree-row${n.matched === false ? ' ctx' : ''}" data-id="${esc(n.id)}"
+        style="padding-left:${8 + (level - 1) * 22}px">
+      <span class="glyph">${glyph}</span>
+      <span class="id">${esc(n.id)}</span>
+      <span class="st ${esc(n.status)}">${statusLabel(n.status)}</span>
+      <span class="badge pri-${esc(n.priority)}">${esc(n.priority)}</span>
+      <span class="t-title">${esc(n.title)}</span>
+      ${n.assignee ? `<span class="assignee">@${esc(n.assignee)}</span>` : ''}
+      <span class="grow"></span>
+      ${n.overCap ? `<span class="subbadge over">${esc(t('hier_over_cap'))}</span>` : ''}
+      ${progressBadge(n)}
+    </div>`);
+    (n.childNodes || []).forEach(walk);
+  };
+  boardRoots.forEach(walk);
+  $('#board-tree').innerHTML =
+    `<div class="muted" style="font-size:12px;margin:2px 8px 8px">${esc(t('hier_cap'))}</div>` +
+    (rows.join('') || `<div class="empty">${t('board_empty')}</div>`);
+  document.querySelectorAll('#board-tree .tree-row').forEach(el => { el.onclick = () => openItem(el.dataset.id); });
+}
+
+function setBoardView(view) {
+  boardView = view === 'tree' ? 'tree' : 'kanban';
+  localStorage.setItem(LS_BOARD_VIEW, boardView);
+  renderBoard(boardRoots);
+}
+
+function cardHtml(n) {
+  const level = Math.max(1, Math.min(n.depth || 1, MAX_LEVEL));
+  return `<div class="card lvl${level}" data-id="${esc(n.id)}">
+    ${crumbHtml(n)}
+    <div class="id">${esc(n.id)}</div>
+    <div class="title">${esc(n.title)}</div>
     <div class="meta">
-      <span class="badge pri-${esc(i.priority)}">${esc(i.priority)}</span>
-      ${caseStatsBadge(i.id)}
-      ${i.assignee ? `<span class="assignee">@${esc(i.assignee)}</span>` : ''}
-      ${(i.tags||[]).slice(0,2).map(t => `<span class="tag">#${esc(t)}</span>`).join('')}
-      ${i.docLink ? `<a href="#" class="card-doc" data-doclink="${esc(i.docLink)}" title="${esc(i.docLink)}">🔗</a>` : ''}
+      <span class="badge pri-${esc(n.priority)}">${esc(n.priority)}</span>
+      ${caseStatsBadge(n.id)}
+      ${n.assignee ? `<span class="assignee">@${esc(n.assignee)}</span>` : ''}
+      ${(n.tags||[]).slice(0,2).map(t => `<span class="tag">#${esc(t)}</span>`).join('')}
+      ${progressBadge(n)}
+      ${n.docLink ? `<a href="#" class="card-doc" data-doclink="${esc(n.docLink)}" title="${esc(n.docLink)}">🔗</a>` : ''}
     </div>
   </div>`;
 }
@@ -550,6 +792,10 @@ function cardHtml(i) {
 function bindCards() {
   document.querySelectorAll('.card').forEach(c => {
     c.onclick = () => openItem(c.dataset.id);
+  });
+  // A breadcrumb link jumps to the parent instead of the card itself.
+  document.querySelectorAll('.card [data-jump]').forEach(a => {
+    a.onclick = (e) => { e.stopPropagation(); e.preventDefault(); openItem(a.dataset.jump); };
   });
   document.querySelectorAll('.card [data-doclink]').forEach(a => {
     a.onclick = (e) => { e.stopPropagation(); e.preventDefault(); openDocLink(a.dataset.doclink); };
@@ -564,15 +810,50 @@ async function openItem(id) {
     .catch(() => []);
   const modal = $('#modal');
   const canDelete = !!(currentUser && (currentUser.role === 'admin' || currentUser.id === i.createdBy));
+  const children = i.childNodes || [];
+  const depth = i.depth || 1;
+  const doneCount = children.filter(c => c.status === 'done').length;
+  const openChildren = children.filter(c => c.status !== 'done');
+  const ancestors = i.ancestors || [];
   modal.innerHTML = `
+    ${ancestors.length ? `<div class="crumb" style="margin-bottom:6px">${ancestors
+      .map(a => `<a data-jump="${esc(a.id)}">${esc(a.id)} · ${esc(a.title)}</a>`)
+      .join('<span class="sep">›</span>')}<span class="sep">›</span><span>${esc(i.id)}</span></div>` : ''}
     <h3>${esc(i.id)} · ${esc(i.title)}</h3>
     <div class="row" style="margin-bottom:10px">
       <span class="badge pri-${esc(i.priority)}">${esc(i.priority)}</span>
       <span class="st ${esc(i.status)}">${statusLabel(i.status)}</span>
       <span class="muted">${esc(i.type)}</span>
+      <span class="muted">${esc(fmt('hier_level', { n: depth }))}</span>
       ${i.assignee ? `<span class="assignee">@${esc(i.assignee)}</span>` : ''}
     </div>
     ${i.description ? `<p class="muted">${esc(i.description)}</p>` : ''}
+    <label>${t('hier_parent')}</label>
+    <div class="row">
+      <select id="w-parent" style="flex:1">${parentOptions(i)}</select>
+      <button class="btn sm" id="w-move">${t('hier_move')}</button>
+    </div>
+    <label>${t('hier_subtasks')}
+      ${children.length ? `<span class="muted" style="font-size:12px">${esc(fmt('hier_progress', { a: doneCount, b: children.length }))}</span>` : ''}</label>
+    <div id="w-children">${children.length
+      ? children.map(c => `<div class="hier-item${(c.depth || 2) >= 3 ? ' lvl3' : ''}" data-child="${esc(c.id)}">
+          <div class="row">
+            <span class="id" style="font-family:monospace;color:var(--accent)">${esc(c.id)}</span>
+            <span class="st ${esc(c.status)}">${statusLabel(c.status)}</span>
+            <span class="badge pri-${esc(c.priority)}">${esc(c.priority)}</span>
+            <b>${esc(c.title)}</b>
+            <span class="grow" style="flex:1"></span>
+            ${(c.childNodes||[]).length ? `<span class="muted" style="font-size:12px">↳ ${esc(fmt('hier_progress', { a: (c.childNodes||[]).filter(x => x.status === 'done').length, b: (c.childNodes||[]).length }))}</span>` : ''}
+          </div>
+        </div>`).join('')
+      : `<div class="empty">${t('hier_no_subtasks')}</div>`}</div>
+    ${depth >= MAX_LEVEL
+      ? `<div class="muted" style="font-size:12px">${esc(t('hier_cap'))}</div>`
+      : `<div class="row" style="margin-top:6px">
+          <input type="text" id="w-sub-input" placeholder="${t('hier_sub_ph')}" style="flex:1" />
+          <button class="btn sm" id="w-sub-add">${t('hier_sub_add')}</button>
+        </div>`}
+    ${openChildren.length ? `<div class="muted" style="font-size:12px">${esc(fmt('hier_open_children', { x: openChildren.map(c => c.id).join(', ') }))}</div>` : ''}
     <label>${t('form_doc_link')}</label>
     <div class="row" style="align-items:center">
       <input type="text" id="w-doc" value="${esc(i.docLink||'')}" placeholder="https://…" style="flex:1" />
@@ -601,7 +882,7 @@ async function openItem(id) {
       <input type="text" id="note-input" placeholder="${t('w_note_ph')}" />
       <button class="btn" id="note-add">${t('w_note_add')}</button>
     </div>
-    <div class="row" style="margin-top:16px">
+    <div class="modal-actions">
       ${canDelete ? `<button class="btn sm danger" id="w-delete">${t('w_delete')}</button>` : ''}
       <button class="btn" id="w-close">${t('close')}</button>
     </div>`;
@@ -639,6 +920,31 @@ async function openItem(id) {
     await refresh();
   };
   $('#w-close').onclick = closeModal;
+  // ---- hierarchy wiring: breadcrumb, move, decompose, jump to a subtask ----
+  document.querySelectorAll('#modal [data-jump]').forEach(a => {
+    a.onclick = async (e) => { e.preventDefault(); await openItem(a.dataset.jump); };
+  });
+  document.querySelectorAll('#w-children [data-child]').forEach(el => {
+    el.onclick = async () => { await openItem(el.dataset.child); };
+  });
+  $('#w-move').onclick = async () => {
+    const parent = $('#w-parent').value;
+    try {
+      await api.send(`/api/workitems/${id}/move?project=${encodeURIComponent(project)}`, 'POST', { parent: parent || null, author: 'user' });
+      await refresh();
+      await openItem(id);
+    } catch (e) { /* already toasted */ }
+  };
+  const subAdd = $('#w-sub-add');
+  if (subAdd) subAdd.onclick = async () => {
+    const title = $('#w-sub-input').value.trim();
+    if (!title) return notify(t('alert_title'));
+    try {
+      await api.send(`/api/workitems/${id}/decompose?project=${encodeURIComponent(project)}`, 'POST', { children: [{ title }], author: 'user' });
+      await refresh();
+      await openItem(id);
+    } catch (e) { /* already toasted */ }
+  };
   // Jump straight from a work item to the case that verifies it.
   document.querySelectorAll('#w-tests [data-case]').forEach(el => {
     el.onclick = async () => {
@@ -651,6 +957,23 @@ async function openItem(id) {
 }
 
 function closeModal() { $('#modal-bg').classList.remove('open'); }
+
+/**
+ * Options for the "parent task" selector: any item that may legally adopt this
+ * one — top-level or level-2 only (the cap is 3 levels), never itself and never
+ * something already inside its own subtree.
+ */
+function parentOptions(item) {
+  const banned = descendantsOf(item.id);
+  banned.add(item.id);
+  const candidates = [...boardNodeById.values()]
+    .filter(n => !banned.has(n.id))
+    .filter(n => (n.depth || 1) <= MAX_LEVEL - 1)
+    .sort((a, b) => (a.id || '').localeCompare(b.id || '', undefined, { numeric: true }))
+    .map(n => `<option value="${esc(n.id)}" ${n.id === item.parent ? 'selected' : ''}>${'─ '.repeat(Math.max(1, (n.depth || 1)) - 1)}${esc(n.id)} · ${esc(n.title)}</option>`)
+    .join('');
+  return `<option value="" ${item.parent ? '' : 'selected'}>${esc(t('hier_top'))}</option>` + candidates;
+}
 
 // A design-document link can be an external URL, a bare NexPlan doc slug, or a
 // reference like "slug=<slug>" / "doc=<slug>". Normalize these before use.
@@ -1193,23 +1516,53 @@ async function loadAdmin() {
     await loadAdmin(); await refresh();
   };
 
-  $('#project-table').innerHTML = `<tr><th>Key</th><th>${t('col_name')}</th><th>${t('col_members')}</th><th></th></tr>` +
-    projects.map(p => `<tr>
-      <td>${esc(p.key)}${p.key===w.currentProject ? ' <span class="st">default</span>' : ''}</td>
-      <td>${esc(p.name)}</td><td>${esc((p.members||[]).join(', '))||'-'}</td>
-      <td style="white-space:nowrap">
+  // Projects are editable in place: the key (which is also the data directory
+  // name) and the display name. Members stay read-only here — the roster is set
+  // when creating the project.
+  $('#project-table').innerHTML =
+    `<tr><th style="width:24%">${t('col_key')}</th><th style="width:28%">${t('col_name')}</th>` +
+    `<th>${t('col_members')}</th><th style="width:230px"></th></tr>` +
+    projects.map(p => `<tr data-row-key="${esc(p.key)}">
+      <td><input type="text" class="cell key proj-key" value="${esc(p.key)}" spellcheck="false" />
+        ${p.key===w.currentProject ? ' <span class="st">default</span>' : ''}</td>
+      <td><input type="text" class="cell proj-name" value="${esc(p.name)}" /></td>
+      <td>${esc((p.members||[]).join(', '))||'-'}</td>
+      <td class="actions">
+        <button class="btn sm primary" data-save-proj="${esc(p.key)}">${t('save')}</button>
         ${p.key!=='default' ? `<button class="btn sm" data-del-proj="${esc(p.key)}">${t('col_del')}</button>` : ''}
         ${p.key!==w.currentProject ? `<button class="btn sm" data-use-proj="${esc(p.key)}">${t('set_default')}</button>` : ''}
-      </td></tr>`).join('');
+      </td></tr>`).join('') +
+    `<tr><td colspan="4" class="muted" style="font-size:12px">${t('proj_edit_hint')}</td></tr>`;
+  document.querySelectorAll('[data-save-proj]').forEach(b => b.onclick = async () => {
+    const oldKey = b.dataset.saveProj;
+    const row = b.closest('tr');
+    const newKey = row.querySelector('.proj-key').value.trim();
+    const name = row.querySelector('.proj-name').value.trim();
+    try {
+      const updated = await api.send('/api/projects/' + encodeURIComponent(oldKey), 'PATCH', { newKey, name });
+      if (updated.key !== oldKey) {
+        if (project === oldKey) project = updated.key; // stay on the renamed project
+        notify(fmt('proj_renamed', { a: oldKey, b: updated.key }));
+      }
+      await initProjects();
+      await loadAdmin();
+      await refresh();
+    } catch (e) { /* api.send already toasts the reason */ }
+  });
   document.querySelectorAll('[data-del-proj]').forEach(b => b.onclick = async () => {
-    if (confirm(fmt('confirm_del_proj', { x: b.dataset.delProj }))) { await api.send('/api/projects/' + encodeURIComponent(b.dataset.delProj), 'DELETE'); await refresh(); }
+    if (confirm(fmt('confirm_del_proj', { x: b.dataset.delProj }))) {
+      await api.send('/api/projects/' + encodeURIComponent(b.dataset.delProj), 'DELETE');
+      await refresh();
+    }
   });
   document.querySelectorAll('[data-use-proj]').forEach(b => b.onclick = async () => {
     await api.send('/api/workspace/default-project', 'POST', { key: b.dataset.useProj });
     await initProjects(); await refresh();
   });
 
-  $('#user-table').innerHTML = `<tr><th>ID</th><th>${t('col_name')}</th><th>Type</th><th>Role</th><th></th></tr>` +
+  $('#user-table').innerHTML =
+    `<tr><th style="width:22%">ID</th><th style="width:26%">${t('col_name')}</th>` +
+    `<th style="width:12%">Type</th><th style="width:22%">Role</th><th style="width:110px"></th></tr>` +
     users.map(u => `<tr>
       <td>${esc(u.id)}</td><td>${esc(u.name)}</td><td>${u.kind}</td>
       <td><select class="role" data-user="${esc(u.id)}">${['admin','member','viewer'].map(r => `<option ${r===u.role?'selected':''}>${r}</option>`).join('')}</select></td>
@@ -1741,7 +2094,7 @@ function changePasswordForm() {
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   ['board','bugs','tests','docs','admin'].forEach(v => $('#view-' + v).classList.toggle('hidden', name !== v));
-  refresh();
+  return refresh();
 }
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
 $('#refresh').onclick = refresh;
@@ -1770,6 +2123,9 @@ $('#q').oninput = debounce(loadBoard, 300);
 $('#bq').oninput = debounce(loadBugs, 300);
 $('#filter-priority').onchange = loadBoard;
 $('#filter-assignee').onchange = loadBoard;
+$('#filter-status').onchange = loadBoard;
+$('#view-kanban').onclick = () => setBoardView('kanban');
+$('#view-tree').onclick = () => setBoardView('tree');
 $('#b-severity').onchange = loadBugs;
 $('#b-status').onchange = loadBugs;
 

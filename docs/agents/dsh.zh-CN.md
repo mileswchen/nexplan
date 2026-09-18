@@ -42,12 +42,13 @@ env:
   NEXPLAN_AGENT:  dsh
 ```
 
-随后 28 个 `nexplan_*` 工具就会出现在 dsh 的工具列表里。
+随后 39 个 `nexplan_*` 工具就会出现在 dsh 的工具列表里。
 
 ## dsh 的习惯做法
 
 1. 用 `nexplan add` 录入父特性。
-2. 用 `nexplan decompose <id> --child …` 拆分。
+2. 用 `nexplan decompose <id> --child …` 拆分（最多 3 层；随时用 `nexplan tree <id>`
+   查看挂接关系）。
 3. 用 `nexplan agent-next`（CLI：`nexplan list --status backlog --priority P0`
    或一个小包装）找下一条。
 4. 用 `nexplan docs new|update` 记录设计 / 决策文档。
