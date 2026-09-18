@@ -138,7 +138,7 @@ env:     { NEXPLAN_BOARD: "...", NEXPLAN_PROJECT: "<key>", NEXPLAN_AGENT: "<agen
 ## 状态枚举 / Enums
 
 - 工作项：`backlog todo in_progress review done blocked`
-- 类型：`task feature refactor chore research test bug docs`
+- 类型：`task feature refactor chore research`（缺陷 / 用例 / 文档各有独立模块；旧值 `test bug docs` 仍可读可筛）
 - 优先级：`P0 P1 P2 P3`
 - 缺陷级别：`critical major minor trivial`
 - 缺陷状态：`open in_progress fixed verified wontfix reopened`

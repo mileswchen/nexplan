@@ -82,7 +82,7 @@ program
   .description('Add a work item to the backlog.')
   .argument('[title]', 'Title of the work item (or use --title).')
   .option('--title <title>', 'Title of the work item.')
-  .option('--type <type>', 'Type: task|feature|refactor|chore|research|test|bug|docs.')
+  .option('--type <type>', 'Nature of the work: task|feature|refactor|chore|research (legacy test|bug|docs still accepted).')
   .option('--description <text>', 'Description.')
   .option('--priority <p>', 'Priority: P0..P3.')
   .option('--assignee <name>', 'Assignee (agent name or user).')

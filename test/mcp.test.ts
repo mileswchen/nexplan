@@ -111,6 +111,16 @@ describe('MCP server tools', () => {
     expect((r.structuredContent as any).parent.children).toEqual(children.map((c: any) => c.id));
   });
 
+  it('only accepts work-nature types for new items', async () => {
+    const rejected = await call('nexplan_backlog_add', { items: [{ title: 'Write the doc', type: 'docs' }] });
+    expect(rejected.isError).toBe(true);
+    const ok = await call('nexplan_backlog_add', { items: [{ title: 'Write the doc', type: 'chore', tags: ['docs'] }] });
+    expect(ok.isError).toBeFalsy();
+    // Legacy values stay readable/filterable for data written earlier.
+    const list = await call('nexplan_backlog_list', { type: 'chore' });
+    expect((list.structuredContent as any).items).toHaveLength(1);
+  });
+
   it('exposes the decomposition tree through the MCP tools', async () => {
     const root = await call('nexplan_backlog_add', { items: [{ title: 'Ship v2' }] });
     const rootId = (root.structuredContent as any).created[0].id;

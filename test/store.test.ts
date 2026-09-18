@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { Store } from '../src/core/store.js';
+import { LEGACY_WORK_ITEM_TYPES, Store, WORKITEM_TYPES } from '../src/core/store.js';
 import { Git } from '../src/core/git.js';
 
 let dir: string;
@@ -70,7 +70,7 @@ describe('work items', () => {
     const parent = await store.createWorkItem({ title: 'Ship v1', type: 'feature' });
     const { parent: updated, children } = await store.decomposeWorkItem(parent.id, [
       { title: 'Build API', type: 'refactor' },
-      { title: 'Write docs', type: 'docs' },
+      { title: 'Write docs', type: 'chore' },
     ]);
     expect(children).toHaveLength(2);
     expect(children[0].parent).toBe(parent.id);
@@ -230,6 +230,26 @@ describe('work item hierarchy', () => {
     const grand = await store.createWorkItem({ title: 'Grandchild', parent: child.id });
     await expect(store.createWorkItem({ title: 'Too deep', parent: grand.id })).rejects.toThrow(/limited to 3 levels/);
     await expect(store.createWorkItem({ title: 'Orphan', parent: 'WI-999' })).rejects.toThrow(/parent work item not found/);
+  });
+
+  it('offers only work-nature types, and still reads legacy ones', async () => {
+    // Bugs, test cases and documents have their own records, so they are not
+    // work-item types any more.
+    expect(WORKITEM_TYPES).toEqual(['task', 'feature', 'refactor', 'chore', 'research']);
+    expect([...LEGACY_WORK_ITEM_TYPES]).toEqual(['test', 'bug', 'docs']);
+
+    // A record written by an older version keeps its type: readable, filterable,
+    // and rendered in trees. Nothing is rewritten on read.
+    const item = await store.createWorkItem({ title: 'Legacy docs task' });
+    const file = path.join(dir, 'workitems', `${item.id}.json`);
+    const raw = JSON.parse(await readFile(file, 'utf8'));
+    raw.type = 'docs';
+    await writeFile(file, JSON.stringify(raw));
+
+    expect((await store.getWorkItem(item.id))?.type).toBe('docs');
+    expect((await store.getWorkItemTree(item.id))?.type).toBe('docs');
+    const filtered = await store.listWorkItems({ type: 'docs' as never });
+    expect(filtered.map((i) => i.id)).toEqual([item.id]);
   });
 
   it('guards the parent/children links against raw patches', async () => {
