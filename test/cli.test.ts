@@ -39,7 +39,9 @@ beforeEach(async () => {
   dir = await mkdtemp(path.join(tmpdir(), 'nexplan-cli-'));
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  // Retries cover the ENOTEMPTY race when a git child process is still
+  // finishing a write inside .git/ while the temp dir is being removed.
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe('cli: batch run reporting', () => {
