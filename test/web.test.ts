@@ -52,7 +52,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
-  await rm(dir, { recursive: true, force: true });
+  // Retries cover the ENOTEMPTY race when a git child process is still
+  // finishing a write inside .git/ while the temp dir is being removed.
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 describe('web dashboard: test cases and runs', () => {

@@ -30,7 +30,9 @@ beforeEach(async () => {
 afterEach(async () => {
   await client.close();
   await server.close();
-  await rm(dir, { recursive: true, force: true });
+  // Retries cover the ENOTEMPTY race when a git child process is still
+  // finishing a write inside .git/ while the temp dir is being removed.
+  await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 
 async function call(name: string, args: Record<string, unknown>) {
