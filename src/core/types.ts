@@ -1,14 +1,19 @@
 /** Domain types for NexPlan. */
 
-export type WorkItemType =
-  | 'task'
-  | 'feature'
-  | 'refactor'
-  | 'chore'
-  | 'research'
-  | 'test'
-  | 'bug'
-  | 'docs';
+/**
+ * The *nature of the work*, not the artifact it produces. Bugs, test cases and
+ * documents already have first-class records with their own tabs (`BUG-N`,
+ * `TC-N`, versioned docs), so a work item needs no type for them: record that
+ * work as `task` and tag it (`#testing`, `#docs`) when the extra signal matters.
+ *
+ * `'test' | 'bug' | 'docs'` are legacy values from earlier versions: they are
+ * still read back and filtered unchanged, they are just no longer offered when
+ * creating an item.
+ */
+export type WorkItemType = 'task' | 'feature' | 'refactor' | 'chore' | 'research';
+
+/** Types earlier versions wrote; kept readable (and writable via raw JSON). */
+export const LEGACY_WORK_ITEM_TYPES = ['test', 'bug', 'docs'] as const;
 
 export type WorkItemStatus =
   | 'backlog'

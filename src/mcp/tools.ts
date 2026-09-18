@@ -6,7 +6,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 // `as const` tuples keep zod's inferred types as literal unions, which match the
 // store's domain types exactly (a `[string, ...string[]]` cast would widen them).
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3'] as const;
-const ITEM_TYPES = ['task', 'feature', 'refactor', 'chore', 'research', 'test', 'bug', 'docs'] as const;
+const ITEM_TYPES = ['task', 'feature', 'refactor', 'chore', 'research'] as const;
 const ITEM_STATUSES = ['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked'] as const;
 const BUG_SEVERITIES = ['critical', 'major', 'minor', 'trivial'] as const;
 const BUG_STATUSES = ['open', 'in_progress', 'fixed', 'verified', 'wontfix', 'reopened'] as const;
@@ -77,7 +77,10 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
 
   const addItemSchema = z.object({
     title: z.string().min(1).describe('Short title of the work item.'),
-    type: itemTypes.optional().describe('Type/kind of work item. Default: task.'),
+    type: itemTypes.optional().describe(
+      'Nature of the work. Default: task. Bugs, test cases and documents have their own records '
+        + '(nexplan_bug_add / nexplan_test_case_add / nexplan_docs_create) instead of a work item type.',
+    ),
     description: z.string().optional(),
     priority: priorities.optional().describe('P0..P3. Default: P2.'),
     assignee: z.string().nullish(),

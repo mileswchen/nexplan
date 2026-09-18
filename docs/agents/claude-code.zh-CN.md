@@ -33,7 +33,7 @@ Claude Code 从项目级 `.mcp.json`（推荐，随仓库提交）或用户配�
 cd /绝对路径/到/nexplan && npm install && npm run build
 
 export NEXPLAN_BOARD="$PWD/.nexplan"
-nexplan add "修复登录 500" --type bug --priority P1 --manual
+nexplan add "修复登录 500" --type task --priority P1 --fixes-bug BUG-1 --manual   # 缺陷本身走 nexplan bug add
 nexplan list --status backlog
 nexplan done WI-3 --note "已修复"
 ```

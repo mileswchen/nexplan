@@ -46,6 +46,7 @@ import {
   TestRunFilter,
   TestStep,
   DEFAULT_ARCHIVE_POLICY,
+  LEGACY_WORK_ITEM_TYPES,
   MAX_WORK_ITEM_DEPTH,
   WorkItem,
   WorkItemNode,
@@ -97,7 +98,7 @@ type Bg = Omit<Bug, never> & { schema: 'bug' };
 type Tc = Omit<TestCase, never> & { schema: 'testcase' };
 type Tr = Omit<TestRun, never> & { schema: 'testrun' };
 
-const WORKITEM_TYPES: WorkItemType[] = ['task', 'feature', 'refactor', 'chore', 'research', 'test', 'bug', 'docs'];
+const WORKITEM_TYPES: WorkItemType[] = ['task', 'feature', 'refactor', 'chore', 'research'];
 const WORKITEM_STATUSES: WorkItemStatus[] = ['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked'];
 const PRIORITIES: Priority[] = ['P0', 'P1', 'P2', 'P3'];
 const BUG_SEVERITIES: BugSeverity[] = ['critical', 'major', 'minor', 'trivial'];
@@ -2269,6 +2270,7 @@ function matchesRunFilter(run: TestRun, filter: TestRunFilter): boolean {
 
 export {
   WORKITEM_TYPES,
+  LEGACY_WORK_ITEM_TYPES,
   WORKITEM_STATUSES,
   PRIORITIES,
   BUG_SEVERITIES,

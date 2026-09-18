@@ -33,7 +33,7 @@ The same board is reachable from a shell, which Claude Code can also drive:
 cd /abs/path/to/nexplan && npm install && npm run build
 
 export NEXPLAN_BOARD="$PWD/.nexplan"
-nexplan add "修复登录 500" --type bug --priority P1 --manual
+nexplan add "修复登录 500" --type task --priority P1 --fixes-bug BUG-1 --manual   # 缺陷本身走 nexplan bug add
 nexplan list --status backlog
 nexplan done WI-3 --note "已修复"
 ```

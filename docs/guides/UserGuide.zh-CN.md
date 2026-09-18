@@ -75,7 +75,10 @@ node dist/cli/index.js status
 
 ### 状态、类型与优先级
 
-- **工作项类型**：`task`、`feature`、`refactor`、`chore`、`research`、`test`、`bug`、`docs`
+- **工作项类型**：`task`、`feature`、`refactor`、`chore`、`research` —— 描述的是**工作的性质**。
+  缺陷、测试用例、文档各有独立记录与标签页（`BUG-N`、`TC-N`、版本化文档），因此不再作为工作项类型：
+  这类工作记为 `task`，需要额外信号时打标签 `#testing` / `#docs`。旧版本创建的数据可能仍带
+  `test` / `bug` / `docs`，显示与筛选行为完全不变。
 - **工作项状态**：`backlog` → `todo` → `in_progress` → `review` → `done`（另有 `blocked`）
 - **优先级**：`P0` … `P3`（P0 最高）
 - **缺陷级别**：`critical`、`major`、`minor`、`trivial`

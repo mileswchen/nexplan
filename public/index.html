@@ -1924,7 +1924,7 @@ function newItemForm() {
   modalShell(`
     <h3>${t('form_new_item')}</h3>
     <label>${t('form_title')}</label><input type="text" id="n-title" />
-    <label>${t('form_type')}</label><select id="n-type">${['task','feature','refactor','chore','research','test','docs'].map(t2=>`<option>${t2}</option>`).join('')}</select>
+    <label>${t('form_type')}</label><select id="n-type">${['task','feature','refactor','chore','research'].map(t2=>`<option>${t2}</option>`).join('')}</select>
     <div class="row"><div style="flex:1"><label>${t('form_priority')}</label><select id="n-pri">${['P0','P1','P2','P3'].map(p=>`<option>${p}</option>`).join('')}</select></div>
       <div style="flex:1"><label>${t('form_tags')}</label><input type="text" id="n-tags" /></div></div>
     <label>${t('form_desc')}</label><textarea id="n-desc"></textarea>

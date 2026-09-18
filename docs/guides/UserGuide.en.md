@@ -78,7 +78,11 @@ Every mutation runs `git add` + `git commit` (scoped to the project subtree), so
 
 ### Statuses, types and priorities
 
-- **Work item type**: `task`, `feature`, `refactor`, `chore`, `research`, `test`, `bug`, `docs`
+- **Work item type**: `task`, `feature`, `refactor`, `chore`, `research` — the *nature of the work*.
+  Bugs, test cases and documents are separate records with their own tabs (`BUG-N`, `TC-N`, versioned
+  docs), so they are not work-item types: record that work as `task` and tag it `#testing` / `#docs`
+  when the extra signal helps. Items created by older versions may still carry `test` / `bug` / `docs`;
+  they display and filter exactly as before.
 - **Work item status**: `backlog` → `todo` → `in_progress` → `review` → `done` (plus `blocked`)
 - **Priority**: `P0` … `P3` (P0 highest)
 - **Bug severity**: `critical`, `major`, `minor`, `trivial`
