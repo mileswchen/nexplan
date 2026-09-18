@@ -421,7 +421,7 @@ you clicked.
 
 The dashboard has these tabs:
 
-- **Board** — a kanban by status (`待办 / 待开始 / 进行中 / 评审中 / 完成 / 阻塞`). Click a
+- **Work items** — the whole work-item list, shown as a kanban by status; switch to **Tree** for the attached hierarchy, and the summary chips above drill into this same tab. The columns are `待办 / 待开始 / 进行中 / 评审中 / 完成 / 阻塞`. Click a
   card to open detail: view description, notes, change status, **claim/start**,
   **mark done**, and add notes. Use the search box, priority and assignee filters, and
   the **+ 新建待办** button to add items manually. A card whose work item has linked test
