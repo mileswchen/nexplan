@@ -11,8 +11,14 @@ import { registerNexplanTools } from '../src/mcp/tools.js';
 let dir: string;
 let client: Client;
 let server: McpServer;
+let savedProjectEnv: string | undefined;
 
 beforeEach(async () => {
+  // Tools resolve their project from $NEXPLAN_PROJECT when a call omits
+  // `project`, so a value exported in the developer's shell would otherwise
+  // change what every expectation below sees. The tests that care set it.
+  savedProjectEnv = process.env.NEXPLAN_PROJECT;
+  delete process.env.NEXPLAN_PROJECT;
   dir = await mkdtemp(path.join(tmpdir(), 'nexplan-mcp-'));
   const workspace = new Workspace({ root: dir, agentName: 'mcp-agent', autoCommit: true });
   await workspace.init();
@@ -30,6 +36,8 @@ beforeEach(async () => {
 afterEach(async () => {
   await client.close();
   await server.close();
+  if (savedProjectEnv === undefined) delete process.env.NEXPLAN_PROJECT;
+  else process.env.NEXPLAN_PROJECT = savedProjectEnv;
   // Retries cover the ENOTEMPTY race when a git child process is still
   // finishing a write inside .git/ while the temp dir is being removed.
   await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -242,6 +250,43 @@ describe('MCP server tools', () => {
     expect((apiList.structuredContent as any).items[0].title).toBe('API task');
     const projects = await call('nexplan_project_list', {});
     expect((projects.structuredContent as any).items.map((p: any) => p.key)).toEqual(['default', 'api']);
+  });
+
+  it('resolves the project from $NEXPLAN_PROJECT when a call omits it', async () => {
+    await call('nexplan_project_create', { key: 'api', name: 'API' });
+    await call('nexplan_backlog_add', { items: [{ title: 'Default task' }] });
+    await call('nexplan_backlog_add', { items: [{ title: 'API task' }], project: 'api' });
+
+    // `nexplan agent config <agent> --project api` scopes an agent through this
+    // variable alone, so a call without `project` must stay inside `api` — for
+    // reads and for writes. Falling back to the workspace default instead would
+    // move an agent's work into another project without any error.
+    process.env.NEXPLAN_PROJECT = 'api';
+    try {
+      const list = await call('nexplan_backlog_list', {});
+      expect((list.structuredContent as any).items.map((i: any) => i.title)).toEqual(['API task']);
+
+      const status = await call('nexplan_status', {});
+      expect((status.structuredContent as any).projectKey).toBe('api');
+
+      await call('nexplan_backlog_add', { items: [{ title: 'Also API' }] });
+      const apiItems = await call('nexplan_backlog_list', { project: 'api' });
+      expect((apiItems.structuredContent as any).items.map((i: any) => i.title).sort()).toEqual(['API task', 'Also API']);
+      const defaultItems = await call('nexplan_backlog_list', { project: 'default' });
+      expect((defaultItems.structuredContent as any).items.map((i: any) => i.title)).toEqual(['Default task']);
+
+      // An explicit argument still beats the environment.
+      const explicit = await call('nexplan_backlog_list', { project: 'default' });
+      expect((explicit.structuredContent as any).items.map((i: any) => i.title)).toEqual(['Default task']);
+
+      // A stale value fails loudly rather than landing somewhere else.
+      process.env.NEXPLAN_PROJECT = 'missing';
+      const bad = await call('nexplan_backlog_list', {});
+      expect(bad.isError).toBe(true);
+      expect(bad.content[0].text).toMatch(/project not found: missing/);
+    } finally {
+      delete process.env.NEXPLAN_PROJECT;
+    }
   });
 
   it('deletes an item as its creator or an admin, but not as an unrelated member', async () => {

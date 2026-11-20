@@ -62,8 +62,19 @@ function ok(data: unknown) {
 // Resolve the project + store + acting author for a tool call.
 // `project` defaults to $NEXPLAN_PROJECT, then the workspace default. Access is
 // gated by the project's member roster (and strict mode) via the workspace.
+//
+// The MCP config printed by `nexplan agent config <agent> --project X` scopes an
+// agent through $NEXPLAN_PROJECT alone, so every tool call that can touch a
+// project has to go through this one helper: an explicit `project` argument
+// wins, then the environment, then the workspace default. Skipping the env step
+// (or bypassing the helper, as `nexplan_status` used to) silently leaves reads
+// and writes on the workspace default project — the wrong project, no error.
+function requestedProject(args: Record<string, unknown>): string | undefined {
+  return (args.project as string | undefined) || process.env.NEXPLAN_PROJECT;
+}
+
 async function projectStore(workspace: Workspace, args: Record<string, unknown>, opts: { write?: boolean } = {}) {
-  const project = await workspace.resolveProject(args.project as string | undefined);
+  const project = await workspace.resolveProject(requestedProject(args));
   const store = workspace.getStore(project);
   const actor = (args.author as string) || process.env.NEXPLAN_AGENT || 'agent';
   await workspace.assertProjectAccess(project, actor, { write: opts.write });
@@ -71,7 +82,10 @@ async function projectStore(workspace: Workspace, args: Record<string, unknown>,
 }
 
 export function registerNexplanTools(server: McpServer, workspace: Workspace): void {
-  const projectOpt = z.string().optional().describe('Project key. Defaults to the workspace default project.');
+  const projectOpt = z
+    .string()
+    .optional()
+    .describe('Project key. Defaults to $NEXPLAN_PROJECT, then the workspace default project.');
 
   // ---------------------------------------------------------------- backlog
 
@@ -543,7 +557,7 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
   server.registerTool(
     'nexplan_status',
     { title: 'Project status', description: 'Summary counts by status and recent activity for a project.', inputSchema: z.object({ project: projectOpt }) },
-    async (args) => ok(await workspace.summary(args.project as string | undefined)),
+    async (args) => ok(await workspace.summary(requestedProject(args))),
   );
 
   server.registerTool(
