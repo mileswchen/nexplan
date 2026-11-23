@@ -50,6 +50,6 @@ describe('dashboard i18n', () => {
     const html = await readFile(htmlPath, 'utf8');
     expect(html).toContain('data-tab="tests"');
     expect(html).toContain('id="view-tests"');
-    expect(html).toContain("['board','bugs','tests','docs','admin']");
+    expect(html).toContain("['board','bugs','tests','docs','plans','admin']");
   });
 });

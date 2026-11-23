@@ -203,6 +203,54 @@
   .md img { max-width: 100%; border-radius: 6px; }
   .md hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
   .md del { color: var(--muted); }
+  /* ---- plans / gantt ---- */
+  .gantt-summary { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;
+    font-size: 13px; color: var(--muted); }
+  .gantt-summary b { color: var(--text); }
+  .gantt-warnings { border-left: 3px solid var(--yellow, #d9a53a); background: rgba(217,165,58,.12);
+    padding: 6px 10px; margin-bottom: 10px; border-radius: 6px; font-size: 12.5px; }
+  .gantt-scroll { overflow: auto; max-height: 68vh; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel); position: relative; }
+  .gantt-flex { display: flex; min-width: max-content; }
+  .gantt-left { width: 280px; flex: none; position: sticky; left: 0; z-index: 2; background: var(--panel);
+    border-right: 1px solid var(--border); }
+  .gantt-head-l { height: 46px; padding: 6px 10px; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .4px; display: flex; align-items: flex-end;
+    border-bottom: 1px solid var(--border); background: var(--panel); }
+  .gantt-row { height: 36px; padding: 4px 10px; border-bottom: 1px solid var(--border); cursor: pointer;
+    overflow: hidden; font-size: 12.5px; }
+  .gantt-row:hover { background: var(--panel2); }
+  .gantt-row .g-l1 { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; }
+  .gantt-row .g-id { font-family: ui-monospace, Menlo, monospace; color: var(--accent); font-size: 11.5px; }
+  .gantt-row .g-title { overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+  .gantt-row .g-l2 { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .gantt-row.is-milestone .g-title::before { content: '◆ '; color: var(--accent); }
+  .gantt-svg { display: block; }
+  .gantt-svg text { font-size: 11px; fill: var(--muted); }
+  .gantt-svg .g-bar { fill: var(--accent); opacity: .28; }
+  .gantt-svg .g-fill { fill: var(--accent); }
+  .gantt-svg .g-done .g-bar { fill: #3f9b62; opacity: .30; }
+  .gantt-svg .g-done .g-fill { fill: #3f9b62; }
+  .gantt-svg .g-ms { fill: var(--accent); }
+  .gantt-svg .g-dep { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+  .gantt-svg .g-today { stroke: #e5484d; stroke-width: 1.4; stroke-dasharray: 4 3; }
+  .gantt-svg .g-today-label { fill: #e5484d; font-size: 10px; }
+  .gantt-svg .g-grid { stroke: var(--border); stroke-width: 1; }
+  .gantt-svg .g-grid-minor { stroke: var(--border); stroke-width: 1; opacity: .45; }
+  .gantt-svg .g-weekend { fill: rgba(127,127,127,.08); }
+  .gantt-svg .g-hover { fill: transparent; }
+  .gantt-svg .g-hover:hover { fill: rgba(127,127,127,.06); }
+  .gantt-svg .g-auto-badge { fill: var(--panel2); stroke: var(--border); }
+  /* ---- task drawer ---- */
+  .drawer-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; z-index: 40; }
+  .drawer-bg.open { display: block; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 400px; max-width: 92vw; background: var(--panel);
+    border-left: 1px solid var(--border); padding: 16px; overflow: auto; z-index: 41;
+    transform: translateX(105%); transition: transform .18s ease; }
+  .drawer-bg.open .drawer { transform: none; }
+  .drawer h3 { margin: 0 0 12px; }
+  .drawer label { display: block; margin: 10px 0 4px; font-size: 12.5px; color: var(--muted); }
+  .drawer .row2 { display: flex; gap: 10px; } .drawer .row2 > div { flex: 1; }
 </style>
 </head>
 <body>
@@ -215,6 +263,7 @@
     <button class="tab" data-tab="bugs" data-i18n="tab_bugs">Bugs</button>
     <button class="tab" data-tab="tests" data-i18n="tab_tests">Tests</button>
     <button class="tab" data-tab="docs" data-i18n="tab_docs">Docs</button>
+    <button class="tab" data-tab="plans" data-i18n="tab_plans">Plans</button>
     <button class="tab" data-tab="admin" data-i18n="tab_admin">Admin</button>
   </div>
   <select id="lang-select" class="lang" aria-label="Language">
@@ -301,6 +350,23 @@
     </div>
   </section>
 
+  <!-- PLANS (gantt) -->
+  <section id="view-plans" class="hidden">
+    <div class="toolbar">
+      <select id="plan-select" style="min-width:220px"></select>
+      <div class="seg">
+        <button class="btn sm" id="gz-day" data-i18n="gz_day">Day</button>
+        <button class="btn sm" id="gz-week" data-i18n="gz_week">Week</button>
+        <button class="btn sm" id="gz-month" data-i18n="gz_month">Month</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn" id="edit-plan" data-i18n="plan_edit">Settings</button>
+      <button class="btn" id="new-task" data-i18n="new_task">+ Task</button>
+      <button class="btn primary" id="new-plan" data-i18n="new_plan">+ New plan</button>
+    </div>
+    <div class="panel" id="plan-view"><div class="empty" data-i18n="plan_empty">No plans yet</div></div>
+  </section>
+
   <!-- ADMIN -->
   <section id="view-admin" class="hidden">
     <div class="panel" style="margin-bottom:16px">
@@ -337,6 +403,8 @@
 <div class="modal-bg" id="modal-bg">
   <div class="modal" id="modal"></div>
 </div>
+<!-- plan task drawer -->
+<div class="drawer-bg" id="drawer-bg"><div class="drawer" id="drawer"></div></div>
 <div id="toast"></div>
 
 <script>
@@ -429,6 +497,21 @@ const I18N = {
     archive_reindexed: 'Index rebuilt',
     batch_record: 'Record selected', batch_pick: 'Select for batch recording',
     batch_pick_none: 'Select at least one case first',
+    // plans / gantt
+    tab_plans: 'Plans', new_plan: '+ New plan', plan_edit: 'Settings', new_task: '+ Task',
+    plan_empty: 'No plans yet — create one to see the Gantt chart',
+    gz_day: 'Day', gz_week: 'Week', gz_month: 'Month',
+    plan_span: 'Span', plan_progress_total: 'Overall', plan_tasks: 'Tasks',
+    plan_warnings: 'Warnings', plan_today: 'Today', plan_auto_badge: 'auto (derived from work items)',
+    plan_created_by: 'by', plan_no_dates: 'No dates yet',
+    form_new_plan: 'New plan', form_edit_plan: 'Plan settings', form_plan_title: 'Title',
+    form_plan_status: 'Status (archived replaces deletion)',
+    form_task_new: 'New task', form_task_edit: 'Edit task', form_task_title: 'Title',
+    form_start: 'Start', form_end: 'End (≥ start; milestone needs start = end)',
+    form_progress: 'Progress (%)', form_progress_source: 'Progress source',
+    form_task_status: 'Status', form_deps: 'Dependencies (task ids, comma-separated)',
+    form_assignee: 'Assignee', form_milestone: 'Milestone', form_work_items: 'Linked work items (WI-N, comma-separated)',
+    form_note: 'Note', delete_task: 'Delete task', confirm_del_task: 'Delete task {x}?',
   },
   zh: {
     title: 'NexPlan 项目管理',
@@ -514,6 +597,21 @@ const I18N = {
     archive_reindexed: '索引已重建',
     batch_record: '批量记录执行', batch_pick: '勾选以批量记录',
     batch_pick_none: '请先勾选至少一条用例',
+    // plans / gantt
+    tab_plans: '计划', new_plan: '+ 新建计划', plan_edit: '设置', new_task: '+ 任务',
+    plan_empty: '还没有计划 —— 创建一个即可看到甘特图',
+    gz_day: '日', gz_week: '周', gz_month: '月',
+    plan_span: '起止', plan_progress_total: '整体进度', plan_tasks: '任务',
+    plan_warnings: '警告', plan_today: '今天', plan_auto_badge: 'auto（按工作项聚合）',
+    plan_created_by: '创建者', plan_no_dates: '暂无日期',
+    form_new_plan: '新建计划', form_edit_plan: '计划设置', form_plan_title: '标题',
+    form_plan_status: '状态（archived 代替删除）',
+    form_task_new: '新建任务', form_task_edit: '编辑任务', form_task_title: '标题',
+    form_start: '开始', form_end: '结束（≥ 开始；里程碑需开始=结束）',
+    form_progress: '进度（%）', form_progress_source: '进度来源',
+    form_task_status: '状态', form_deps: '前置依赖（任务 ID，逗号分隔）',
+    form_assignee: '负责人', form_milestone: '里程碑', form_work_items: '关联工作项（WI-N，逗号分隔）',
+    form_note: '备注', delete_task: '删除任务', confirm_del_task: '删除任务 {x} ？',
   }
 };
 
@@ -1050,6 +1148,7 @@ async function refresh() {
   if (!$('#view-bugs').classList.contains('hidden')) await loadBugs();
   if (!$('#view-tests').classList.contains('hidden')) await loadTestCases();
   if (!$('#view-docs').classList.contains('hidden')) await loadDocsList();
+  if (!$('#view-plans').classList.contains('hidden')) await loadPlans();
   if (!$('#view-admin').classList.contains('hidden')) await loadAdmin();
 }
 
@@ -2090,10 +2189,270 @@ function changePasswordForm() {
   };
 }
 
+// ---------------- plans / gantt (hand-written SVG, zero deps) ----------------
+let plansList = [];
+let planId = null;
+let ganttZoom = 'day';
+const GANTT_PX = { day: 30, week: 10, month: 3.4 }; // px per day, per zoom level
+const GANTT_ROW = 36, GANTT_HEAD = 46, GANTT_BAR = 18, GANTT_PAD_LEFT = 280;
+
+const isoAddDays = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+const isoToday = () => new Date().toISOString().slice(0, 10);
+const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+const plansBase = () => '/api/projects/' + encodeURIComponent(project) + '/plans';
+
+async function loadPlans() {
+  plansList = await api.get(plansBase());
+  if (!plansList.some(p => p.id === planId)) planId = (plansList[0] || {}).id || null;
+  renderPlans();
+}
+
+function renderPlans() {
+  $('#plan-select').innerHTML = plansList.map(p =>
+    `<option value="${esc(p.id)}" ${p.id === planId ? 'selected' : ''}>${esc(p.title)} · ${esc(p.id)}${p.status !== 'active' ? ' (' + esc(p.status) + ')' : ''}</option>`).join('');
+  const v = plansList.find(p => p.id === planId);
+  $('#plan-view').innerHTML = v ? renderGantt(v) : `<div class="empty">${esc(t('plan_empty'))}</div>`;
+  if (v) bindGantt(v);
+}
+
+/** One Gantt canvas: sticky left task column + SVG time grid (day/week/month zoom). */
+function renderGantt(v) {
+  const s = v.summary || {};
+  const head = `
+    <div class="gantt-summary">
+      <span>${esc(t('plan_span'))}: <b>${esc(s.start || t('plan_no_dates'))} → ${esc(s.end || '—')}</b></span>
+      <span>${esc(t('plan_progress_total'))}: <b>${s.progress || 0}%</b></span>
+      <span>${esc(t('plan_tasks'))}: <b>${v.tasks.length}</b></span>
+      ${v.createdBy ? `<span class="muted">${esc(t('plan_created_by'))}: ${esc(v.createdBy)}</span>` : ''}
+    </div>` +
+    (v.warnings && v.warnings.length
+      ? `<div class="gantt-warnings">⚠ ${esc(t('plan_warnings'))}: ${v.warnings.map(w => esc(w)).join('；')}</div>` : '');
+  if (!v.tasks.length) return head + `<div class="empty">${esc(t('plan_empty'))}</div>`;
+
+  const px = GANTT_PX[ganttZoom] || 30;
+  const today = isoToday();
+  const pad = ganttZoom === 'day' ? 1 : ganttZoom === 'week' ? 3 : 7;
+  let t0 = [s.start, today].filter(Boolean).sort()[0];
+  let t1 = [s.end, today].filter(Boolean).sort().pop();
+  t0 = isoAddDays(t0, -pad);
+  t1 = isoAddDays(t1, pad);
+  if (daysBetween(t0, t1) < 14) t1 = isoAddDays(t0, 14);
+  const chartW = Math.round((daysBetween(t0, t1) + 1) * px);
+  const height = GANTT_HEAD + v.tasks.length * GANTT_ROW + 2;
+  const xOf = (d) => daysBetween(t0, d) * px;
+  const yOf = (i) => GANTT_HEAD + i * GANTT_ROW;
+
+  // Month bands + grid lines + (day zoom) weekend shading and day numbers.
+  let grid = '', header = '', weekend = '';
+  const months = [];
+  for (let d = t0; d <= t1; d = isoAddDays(d, 1)) {
+    const m = d.slice(0, 7);
+    if (!months.length || months[months.length - 1].m !== m) months.push({ m, from: d });
+  }
+  months.forEach((mo, i) => {
+    const from = i === 0 ? t0 : mo.from;
+    const next = i === months.length - 1 ? isoAddDays(t1, 1) : months[i + 1].from;
+    const x1 = xOf(from), w = Math.max(1, xOf(next) - x1);
+    header += `<rect x="${x1}" y="0" width="${w - 1}" height="16" fill="var(--panel2)" rx="3"/>` +
+      `<text x="${x1 + w / 2}" y="12" text-anchor="middle" font-weight="600">${esc(mo.m)}</text>`;
+    grid += `<line class="g-grid" x1="${x1}" y1="${GANTT_HEAD}" x2="${x1}" y2="${height}"/>`;
+  });
+  for (let d = t0; d <= t1; d = isoAddDays(d, 1)) {
+    const dow = new Date(d + 'T00:00:00Z').getUTCDay();
+    if (ganttZoom === 'day') {
+      if (dow === 0 || dow === 6) weekend += `<rect class="g-weekend" x="${xOf(d)}" y="${GANTT_HEAD}" width="${px}" height="${height - GANTT_HEAD}"/>`;
+      header += `<text x="${xOf(d) + px / 2}" y="30" text-anchor="middle">${d.slice(8)}</text>`;
+      if (dow !== 1) grid += `<line class="g-grid-minor" x1="${xOf(d)}" y1="${GANTT_HEAD}" x2="${xOf(d)}" y2="${height}"/>`;
+    } else if (ganttZoom === 'week' && dow === 1) {
+      header += `<text x="${xOf(d) + 2}" y="30">${d.slice(5)}</text>`;
+      grid += `<line class="g-grid-minor" x1="${xOf(d)}" y1="${GANTT_HEAD}" x2="${xOf(d)}" y2="${height}"/>`;
+    }
+  }
+
+  // Task bars, milestones, progress fills and the "auto" badge.
+  let bars = '', clips = '';
+  v.tasks.forEach((tk, i) => {
+    const y = yOf(i) + (GANTT_ROW - GANTT_BAR) / 2;
+    const cy = yOf(i) + GANTT_ROW / 2;
+    const rowHover = `<rect class="g-hover" data-task="${esc(tk.id)}" x="0" y="${yOf(i)}" width="${chartW}" height="${GANTT_ROW}"/>`;
+    if (tk.milestone) {
+      const cx = xOf(tk.start) + px / 2, r = 7;
+      bars += rowHover + `<g class="${tk.status === 'done' ? 'g-done' : ''}">` +
+        `<rect class="g-ms" x="${cx - r}" y="${cy - r}" width="${2 * r}" height="${2 * r}" transform="rotate(45 ${cx} ${cy})"/>` +
+        `<text x="${cx + 12}" y="${cy + 4}">${esc(tk.title.slice(0, 24))}</text></g>`;
+      return;
+    }
+    const bx = xOf(tk.start) + 1;
+    const bw = Math.max(3, (daysBetween(tk.start, tk.end) + 1) * px - 2);
+    const cid = `clip-${v.id}-${tk.id}`;
+    clips += `<clipPath id="${cid}"><rect x="${bx}" y="${y}" width="${bw}" height="${GANTT_BAR}" rx="4"/></clipPath>`;
+    bars += rowHover + `<g class="${tk.status === 'done' ? 'g-done' : ''}">` +
+      `<rect class="g-bar" x="${bx}" y="${y}" width="${bw}" height="${GANTT_BAR}" rx="4"/>` +
+      `<rect class="g-fill" x="${bx}" y="${y}" width="${Math.max(0, bw * (tk.effectiveProgress || 0) / 100)}" height="${GANTT_BAR}" rx="4" clip-path="url(#${cid})"/>` +
+      (tk.progressSource === 'workitems'
+        ? `<g><rect class="g-auto-badge" x="${bx + bw + 4}" y="${y + 2}" width="32" height="14" rx="4"/><text x="${bx + bw + 20}" y="${y + 12}" text-anchor="middle" font-size="9">auto</text></g>`
+        : '') +
+      `</g>`;
+  });
+
+  // FS dependency arrows: predecessor right edge → successor left edge.
+  const byId = new Map(v.tasks.map((tk) => [tk.id, tk]));
+  let deps = '';
+  v.tasks.forEach((tk, i) => {
+    (tk.deps || []).forEach((dep) => {
+      const pred = byId.get(dep.id);
+      if (!pred) return;
+      const pi = v.tasks.indexOf(pred);
+      const x1 = xOf(pred.start) + 1 + Math.max(3, (daysBetween(pred.start, pred.end) + 1) * px - 2);
+      const y1 = yOf(pi) + GANTT_ROW / 2;
+      const x2 = xOf(tk.start) + 1;
+      const y2 = yOf(i) + GANTT_ROW / 2;
+      const mx = x1 + 7, nx = Math.max(mx + 1, x2 - 7);
+      deps += `<polyline class="g-dep" points="${x1},${y1} ${mx},${y1} ${nx},${y2} ${x2 - 2},${y2}" marker-end="url(#gantt-arrow)"/>`;
+    });
+  });
+
+  const todayX = today >= t0 && today <= t1 ? xOf(today) + px / 2 : null;
+  const todayLine = todayX === null ? '' :
+    `<line class="g-today" x1="${todayX}" y1="0" x2="${todayX}" y2="${height}"/>` +
+    `<text class="g-today-label" x="${todayX + 4}" y="${GANTT_HEAD + 12}">${esc(t('plan_today'))}</text>`;
+
+  const leftRows = v.tasks.map((tk) => `
+    <div class="gantt-row${tk.milestone ? ' is-milestone' : ''}" data-task="${esc(tk.id)}">
+      <div class="g-l1"><span class="g-id">${esc(tk.id)}</span><span class="g-title">${esc(tk.title)}</span><b>${tk.effectiveProgress || 0}%</b></div>
+      <div class="g-l2">${esc(tk.start)} → ${esc(tk.end)}${tk.assignee ? ' · ' + esc(tk.assignee) : ''}${tk.progressSource === 'workitems' ? ' · auto' : ''}${(tk.deps || []).length ? ' · ←' + tk.deps.map(d => esc(d.id)).join(',') : ''}</div>
+    </div>`).join('');
+
+  return head + `
+    <div class="gantt-scroll"><div class="gantt-flex">
+      <div class="gantt-left" style="width:${GANTT_PAD_LEFT}px">
+        <div class="gantt-head-l">${esc(t('plan_tasks'))} · ${esc(v.id)}</div>
+        ${leftRows}
+      </div>
+      <svg class="gantt-svg" width="${chartW}" height="${height}" viewBox="0 0 ${chartW} ${height}">
+        <defs><marker id="gantt-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker></defs>
+        ${weekend}${grid}${clips}${header}${deps}${bars}${todayLine}
+      </svg>
+    </div></div>`;
+}
+
+function bindGantt(v) {
+  document.querySelectorAll('#plan-view [data-task]').forEach((el) => {
+    el.onclick = () => taskDrawer(v, v.tasks.find((x) => x.id === el.dataset.task) || null);
+  });
+}
+
+/** Task create/edit drawer. In workitems mode progress shows the derived value, read-only. */
+function taskDrawer(v, task) {
+  const isNew = !task;
+  const tk = task || { title: '', start: isoToday(), end: isoToday(), progressSource: 'manual', progress: 0, status: 'todo', deps: [], assignee: '', milestone: false, workItems: [], note: '' };
+  const auto = tk.progressSource === 'workitems';
+  $('#drawer').innerHTML = `
+    <h3>${esc(isNew ? t('form_task_new') : t('form_task_edit') + ' · ' + tk.id)}</h3>
+    <label>${esc(t('form_task_title'))}</label><input type="text" id="tk-title" value="${esc(tk.title)}" />
+    <div class="row2">
+      <div><label>${esc(t('form_start'))}</label><input type="date" id="tk-start" value="${esc(tk.start)}" /></div>
+      <div><label>${esc(t('form_end'))}</label><input type="date" id="tk-end" value="${esc(tk.end)}" /></div>
+    </div>
+    <label>${esc(t('form_progress_source'))}</label>
+    <select id="tk-src">
+      <option value="manual" ${!auto ? 'selected' : ''}>manual</option>
+      <option value="workitems" ${auto ? 'selected' : ''}>workitems — ${esc(t('plan_auto_badge'))}</option>
+    </select>
+    <label>${esc(t('form_progress'))}${auto ? ' · ' + esc(t('plan_auto_badge')) + ' = ' + (tk.effectiveProgress || 0) + '%' : ''}</label>
+    <input type="number" id="tk-progress" min="0" max="100" value="${auto ? (tk.effectiveProgress || 0) : (tk.progress || 0)}" ${auto ? 'disabled' : ''} />
+    <label>${esc(t('form_task_status'))}</label>
+    <select id="tk-status">${['todo', 'doing', 'done'].map((x) => `<option ${x === tk.status ? 'selected' : ''}>${x}</option>`).join('')}</select>
+    <label>${esc(t('form_deps'))}</label><input type="text" id="tk-deps" value="${esc((tk.deps || []).map(d => d.id).join(', '))}" placeholder="T1, T2" />
+    <label>${esc(t('form_assignee'))}</label><input type="text" id="tk-assignee" value="${esc(tk.assignee || '')}" />
+    <label><input type="checkbox" id="tk-milestone" ${tk.milestone ? 'checked' : ''} style="width:auto" /> ${esc(t('form_milestone'))}</label>
+    <label>${esc(t('form_work_items'))}</label><input type="text" id="tk-wis" value="${esc((tk.workItems || []).join(', '))}" placeholder="WI-1, WI-2" />
+    <label>${esc(t('form_note'))}</label><input type="text" id="tk-note" value="${esc(tk.note || '')}" />
+    <div class="row" style="margin-top:16px">
+      ${isNew ? '' : `<button class="btn" id="tk-del">${esc(t('delete_task'))}</button><div class="spacer" style="flex:1"></div>`}
+      <button class="btn" id="tk-cancel">${esc(t('cancel'))}</button>
+      <button class="btn primary" id="tk-save">${esc(t('save'))}</button>
+    </div>`;
+  $('#drawer-bg').classList.add('open');
+  const close = () => $('#drawer-bg').classList.remove('open');
+  $('#drawer-bg').onclick = (e) => { if (e.target === e.currentTarget) close(); };
+  $('#tk-src').onchange = () => {
+    const isAuto = $('#tk-src').value === 'workitems';
+    const inp = $('#tk-progress');
+    inp.disabled = isAuto;
+    if (isAuto) inp.value = tk.effectiveProgress || 0; // derived from work items, read-only
+  };
+  $('#tk-cancel').onclick = close;
+  $('#tk-save').onclick = async () => {
+    const body = {
+      title: $('#tk-title').value.trim(),
+      start: $('#tk-start').value,
+      end: $('#tk-end').value,
+      progressSource: $('#tk-src').value,
+      progress: Number($('#tk-progress').value) || 0,
+      status: $('#tk-status').value,
+      deps: $('#tk-deps').value.split(',').map((s) => s.trim()).filter(Boolean).map((id) => ({ id })),
+      assignee: $('#tk-assignee').value.trim() || null,
+      milestone: $('#tk-milestone').checked,
+      workItems: $('#tk-wis').value.split(',').map((s) => s.trim()).filter(Boolean),
+      note: $('#tk-note').value,
+    };
+    try {
+      await api.send(isNew ? `${plansBase()}/${v.id}/tasks` : `${plansBase()}/${v.id}/tasks/${tk.id}`, isNew ? 'POST' : 'PATCH', body);
+      close();
+      await refresh();
+    } catch (e) { /* toasted by api.send */ }
+  };
+  const del = $('#tk-del');
+  if (del) del.onclick = async () => {
+    if (!confirm(fmt('confirm_del_task', { x: tk.id }))) return;
+    try {
+      await api.send(`${plansBase()}/${v.id}/tasks/${tk.id}`, 'DELETE');
+      close();
+      await refresh();
+    } catch (e) { /* toasted (e.g. still depended on) */ }
+  };
+}
+
+/** Plan create / settings modal (status=archived replaces deletion). */
+function planForm(plan) {
+  const isNew = !plan;
+  modalShell(`
+    <h3>${esc(isNew ? t('form_new_plan') : t('form_edit_plan') + ' · ' + plan.id)}</h3>
+    <label>${esc(t('form_plan_title'))}</label><input type="text" id="pl-title" value="${esc(plan ? plan.title : '')}" />
+    <label>${esc(t('form_plan_status'))}</label>
+    <select id="pl-status">${['draft', 'active', 'done', 'archived'].map((x) => `<option ${x === (plan ? plan.status : 'draft') ? 'selected' : ''}>${x}</option>`).join('')}</select>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="pl-cancel">${esc(t('cancel'))}</button>
+      <button class="btn primary" id="pl-save">${esc(t('save'))}</button>
+    </div>`);
+  $('#pl-cancel').onclick = closeModalX;
+  $('#pl-save').onclick = async () => {
+    const title = $('#pl-title').value.trim();
+    if (!title) { notify(t('alert_title')); return; }
+    try {
+      if (isNew) {
+        const created = await api.send(plansBase(), 'POST', { title, status: $('#pl-status').value });
+        planId = created.id;
+      } else {
+        await api.send(`${plansBase()}/${plan.id}`, 'PATCH', { title, status: $('#pl-status').value });
+      }
+      closeModalX();
+      await refresh();
+    } catch (e) { /* toasted by api.send */ }
+  };
+}
+
+function setGanttZoom(z) {
+  ganttZoom = z;
+  ['day', 'week', 'month'].forEach((x) => { const b = $('#gz-' + x); if (b) b.classList.toggle('active', x === z); });
+  renderPlans();
+}
+
 // ---------------- wiring ----------------
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
-  ['board','bugs','tests','docs','admin'].forEach(v => $('#view-' + v).classList.toggle('hidden', name !== v));
+  ['board','bugs','tests','docs','plans','admin'].forEach(v => $('#view-' + v).classList.toggle('hidden', name !== v));
   return refresh();
 }
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
@@ -2128,6 +2487,13 @@ $('#view-kanban').onclick = () => setBoardView('kanban');
 $('#view-tree').onclick = () => setBoardView('tree');
 $('#b-severity').onchange = loadBugs;
 $('#b-status').onchange = loadBugs;
+$('#plan-select').onchange = () => { planId = $('#plan-select').value; renderPlans(); };
+$('#gz-day').onclick = () => setGanttZoom('day');
+$('#gz-week').onclick = () => setGanttZoom('week');
+$('#gz-month').onclick = () => setGanttZoom('month');
+$('#new-plan').onclick = () => planForm(null);
+$('#edit-plan').onclick = () => { const v = plansList.find(p => p.id === planId); if (v) planForm(v); };
+$('#new-task').onclick = () => { const v = plansList.find(p => p.id === planId); if (v) taskDrawer(v, null); };
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
