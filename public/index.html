@@ -251,6 +251,14 @@
   .drawer h3 { margin: 0 0 12px; }
   .drawer label { display: block; margin: 10px 0 4px; font-size: 12.5px; color: var(--muted); }
   .drawer .row2 { display: flex; gap: 10px; } .drawer .row2 > div { flex: 1; }
+  /* ---- gantt hover tooltip (activity name + period) ---- */
+  .gantt-tip { position: fixed; z-index: 60; pointer-events: none; display: none;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 10px; font-size: 12.5px; max-width: 360px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.35); }
+  .gantt-tip.show { display: block; }
+  .gantt-tip b { display: block; margin-bottom: 2px; font-weight: 600; }
+  .gantt-tip span { color: var(--muted); font-size: 11.5px; font-family: ui-monospace, Menlo, monospace; }
 </style>
 </head>
 <body>
@@ -405,6 +413,8 @@
 </div>
 <!-- plan task drawer -->
 <div class="drawer-bg" id="drawer-bg"><div class="drawer" id="drawer"></div></div>
+<!-- gantt hover tooltip -->
+<div class="gantt-tip" id="gantt-tip"></div>
 <div id="toast"></div>
 
 <script>
@@ -2200,6 +2210,9 @@ const isoAddDays = (d, n) => new Date(Date.parse(d + 'T00:00:00Z') + n * 8640000
 const isoToday = () => new Date().toISOString().slice(0, 10);
 const daysBetween = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
 const plansBase = () => '/api/projects/' + encodeURIComponent(project) + '/plans';
+/** Hover tooltip content: activity name + period (also covers truncated left-column titles). */
+const ganttTip = (tk) => `<b>${esc((tk.milestone ? '◆ ' : '') + tk.id + ' ' + tk.title)}</b>` +
+  `<span>${esc(tk.start)} → ${esc(tk.end)}</span>`;
 
 async function loadPlans() {
   plansList = await api.get(plansBase());
@@ -2277,7 +2290,7 @@ function renderGantt(v) {
     const rowHover = `<rect class="g-hover" data-task="${esc(tk.id)}" x="0" y="${yOf(i)}" width="${chartW}" height="${GANTT_ROW}"/>`;
     if (tk.milestone) {
       const cx = xOf(tk.start) + px / 2, r = 7;
-      bars += rowHover + `<g class="${tk.status === 'done' ? 'g-done' : ''}">` +
+      bars += rowHover + `<g class="${tk.status === 'done' ? 'g-done' : ''}" data-tip="${ganttTip(tk)}">` +
         `<rect class="g-ms" x="${cx - r}" y="${cy - r}" width="${2 * r}" height="${2 * r}" transform="rotate(45 ${cx} ${cy})"/>` +
         `<text x="${cx + 12}" y="${cy + 4}">${esc(tk.title.slice(0, 24))}</text></g>`;
       return;
@@ -2286,7 +2299,7 @@ function renderGantt(v) {
     const bw = Math.max(3, (daysBetween(tk.start, tk.end) + 1) * px - 2);
     const cid = `clip-${v.id}-${tk.id}`;
     clips += `<clipPath id="${cid}"><rect x="${bx}" y="${y}" width="${bw}" height="${GANTT_BAR}" rx="4"/></clipPath>`;
-    bars += rowHover + `<g class="${tk.status === 'done' ? 'g-done' : ''}">` +
+    bars += rowHover + `<g class="${tk.status === 'done' ? 'g-done' : ''}" data-tip="${ganttTip(tk)}">` +
       `<rect class="g-bar" x="${bx}" y="${y}" width="${bw}" height="${GANTT_BAR}" rx="4"/>` +
       `<rect class="g-fill" x="${bx}" y="${y}" width="${Math.max(0, bw * (tk.effectiveProgress || 0) / 100)}" height="${GANTT_BAR}" rx="4" clip-path="url(#${cid})"/>` +
       (tk.progressSource === 'workitems'
@@ -2318,7 +2331,7 @@ function renderGantt(v) {
     `<text class="g-today-label" x="${todayX + 4}" y="${GANTT_HEAD + 12}">${esc(t('plan_today'))}</text>`;
 
   const leftRows = v.tasks.map((tk) => `
-    <div class="gantt-row${tk.milestone ? ' is-milestone' : ''}" data-task="${esc(tk.id)}">
+    <div class="gantt-row${tk.milestone ? ' is-milestone' : ''}" data-task="${esc(tk.id)}" data-tip="${ganttTip(tk)}">
       <div class="g-l1"><span class="g-id">${esc(tk.id)}</span><span class="g-title">${esc(tk.title)}</span><b>${tk.effectiveProgress || 0}%</b></div>
       <div class="g-l2">${esc(tk.start)} → ${esc(tk.end)}${tk.assignee ? ' · ' + esc(tk.assignee) : ''}${tk.progressSource === 'workitems' ? ' · auto' : ''}${(tk.deps || []).length ? ' · ←' + tk.deps.map(d => esc(d.id)).join(',') : ''}</div>
     </div>`).join('');
@@ -2494,6 +2507,22 @@ $('#gz-month').onclick = () => setGanttZoom('month');
 $('#new-plan').onclick = () => planForm(null);
 $('#edit-plan').onclick = () => { const v = plansList.find(p => p.id === planId); if (v) planForm(v); };
 $('#new-task').onclick = () => { const v = plansList.find(p => p.id === planId); if (v) taskDrawer(v, null); };
+
+// Hover tooltip on gantt activities (bars, milestones, left rows): name + period.
+const ganttTipEl = $('#gantt-tip');
+$('#plan-view').addEventListener('mousemove', (e) => {
+  const el = e.target.closest ? e.target.closest('[data-tip]') : null;
+  if (!el) { ganttTipEl.classList.remove('show'); return; }
+  ganttTipEl.innerHTML = el.getAttribute('data-tip');
+  ganttTipEl.classList.add('show');
+  const r = ganttTipEl.getBoundingClientRect(), pad = 14;
+  let x = e.clientX + pad, y = e.clientY + pad;
+  if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - pad;
+  if (y + r.height > window.innerHeight - 8) y = e.clientY - r.height - pad;
+  ganttTipEl.style.left = x + 'px';
+  ganttTipEl.style.top = y + 'px';
+});
+$('#plan-view').addEventListener('mouseleave', () => ganttTipEl.classList.remove('show'));
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
