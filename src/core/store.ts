@@ -11,6 +11,7 @@ import {
   summarizeBundle,
 } from './archive.js';
 import { NOW, coerceDocMeta, parseFrontmatter, serializeFrontmatter } from './frontmatter.js';
+import { decoratePlan, validatePlan } from './plan.js';
 import {
   ArchiveBundleInfo,
   ArchivePolicy,
@@ -31,6 +32,13 @@ import {
   ItemSource,
   ListFilter,
   Note,
+  Plan,
+  PlanDep,
+  PlanStatus,
+  PlanTask,
+  PlanTaskStatus,
+  PlanView,
+  ProgressSource,
   Priority,
   RecordRunResult,
   TestCase,
@@ -82,6 +90,7 @@ interface Counters {
   BUG?: number;
   TC?: number;
   TR?: number;
+  PLAN?: number;
   /** Number of runs moved out of the hot directory into archive bundles. */
   TR_ARCHIVED?: number;
   /** Earliest `executedAt` among hot runs (O(1) archive time gate). */
@@ -90,13 +99,14 @@ interface Counters {
   lastArchiveAt?: string | null;
 }
 
-type CounterKey = 'WI' | 'BUG' | 'TC' | 'TR';
+type CounterKey = 'WI' | 'BUG' | 'TC' | 'TR' | 'PLAN';
 
-// Serializable view of a work item / bug / test record for JSON on disk.
+// Serializable view of a work item / bug / test record / plan for JSON on disk.
 type Wi = Omit<WorkItem, never> & { schema: 'workitem' };
 type Bg = Omit<Bug, never> & { schema: 'bug' };
 type Tc = Omit<TestCase, never> & { schema: 'testcase' };
 type Tr = Omit<TestRun, never> & { schema: 'testrun' };
+type Pl = Omit<Plan, never> & { schema: 'plan' };
 
 const WORKITEM_TYPES: WorkItemType[] = ['task', 'feature', 'refactor', 'chore', 'research'];
 const WORKITEM_STATUSES: WorkItemStatus[] = ['backlog', 'todo', 'in_progress', 'review', 'done', 'blocked'];
@@ -167,6 +177,7 @@ export class Store {
     workitems: 'workitems' as string,
     bugs: 'bugs' as string,
     docs: 'docs' as string,
+    plans: 'plans' as string,
     testcases: 'testcases' as string,
     testruns: 'testruns' as string,
     testrunsArchive: 'testruns/archive' as string,
@@ -182,6 +193,7 @@ export class Store {
     this.dirs.workitems = path.join(this.root, 'workitems');
     this.dirs.bugs = path.join(this.root, 'bugs');
     this.dirs.docs = path.join(this.root, 'docs');
+    this.dirs.plans = path.join(this.root, 'plans');
     this.dirs.testcases = path.join(this.root, 'testcases');
     this.dirs.testruns = path.join(this.root, 'testruns');
     this.dirs.testrunsArchive = path.join(this.dirs.testruns, 'archive');
@@ -193,6 +205,7 @@ export class Store {
     await fs.mkdir(this.dirs.workitems, { recursive: true });
     await fs.mkdir(this.dirs.bugs, { recursive: true });
     await fs.mkdir(this.dirs.docs, { recursive: true });
+    await fs.mkdir(this.dirs.plans, { recursive: true });
     await fs.mkdir(this.dirs.testcases, { recursive: true });
     await fs.mkdir(this.dirs.testruns, { recursive: true });
     await fs.mkdir(this.dirs.testrunsArchive, { recursive: true });
@@ -278,6 +291,9 @@ export class Store {
   private bugPath(id: string): string {
     return path.join(this.dirs.bugs, `${id}.json`);
   }
+  private planPath(id: string): string {
+    return path.join(this.dirs.plans, `${id}.json`);
+  }
   private docPath(slug: string): string {
     return path.join(this.dirs.docs, `${slug}.md`);
   }
@@ -320,7 +336,9 @@ export class Store {
           ? this.dirs.bugs
           : prefix === 'TC'
             ? this.dirs.testcases
-            : this.dirs.testruns;
+            : prefix === 'PLAN'
+              ? this.dirs.plans
+              : this.dirs.testruns;
     const files = await this.readDir(dir);
     let max = 0;
     for (const f of files) {
@@ -1045,6 +1063,192 @@ export class Store {
     const updated = { ...existing, ...patch, id, status, closedAt, updatedAt: NOW() } as Bug;
     await this.writeJson(this.bugPath(id), updated);
     return updated;
+  }
+
+  // ------------------------------------------------------------- project plans
+
+  async createPlan(input: { title: string; status?: PlanStatus; author?: string }): Promise<Plan> {
+    const author = input.author ?? this.agentName;
+    const title = input.title.trim();
+    if (!title) throw new Error('title is required');
+    return this.tx(async () => {
+      const now = NOW();
+      const id = await this.nextId('PLAN');
+      const plan: Pl = {
+        schema: 'plan',
+        id,
+        title,
+        status: input.status ?? 'draft',
+        createdBy: author,
+        createdAt: now,
+        updatedAt: now,
+        tasks: [],
+      };
+      await this.writeJson(this.planPath(id), plan);
+      return plan as unknown as Plan;
+    }, (plan) => `plan: create ${plan.id} ${clip(plan.title)}`);
+  }
+
+  async listPlans(): Promise<Plan[]> {
+    const files = (await this.readDir(this.dirs.plans)).filter((f) => f.endsWith('.json'));
+    const plans: Plan[] = [];
+    for (const f of files) {
+      const p = await this.readJson<Plan>(this.planPath(f.replace(/\.json$/, '')));
+      if (p) plans.push(p);
+    }
+    plans.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+    return plans;
+  }
+
+  async getPlan(id: string): Promise<Plan | null> {
+    return (await this.readJson<Plan>(this.planPath(id))) ?? null;
+  }
+
+  /**
+   * Status lookup for `progressSource: 'workitems'` tasks. Unknown ids map to
+   * `undefined`, which effectiveProgress treats as 0.
+   */
+  async workItemStatusLookup(): Promise<(id: string) => WorkItemStatus | undefined> {
+    const map = new Map((await this.listWorkItems()).map((wi) => [wi.id, wi.status]));
+    return (id) => map.get(id);
+  }
+
+  /** The read-model for MCP `plan_list` / REST GETs / the Gantt view. */
+  async listPlanViews(): Promise<PlanView[]> {
+    const statusOf = await this.workItemStatusLookup();
+    const out: PlanView[] = [];
+    for (const plan of await this.listPlans()) out.push(decoratePlan(plan, statusOf));
+    return out;
+  }
+
+  async getPlanView(id: string): Promise<PlanView | null> {
+    const plan = await this.getPlan(id);
+    return plan ? decoratePlan(plan, await this.workItemStatusLookup()) : null;
+  }
+
+  async updatePlan(
+    id: string,
+    patch: { title?: string; status?: PlanStatus },
+    author?: string,
+  ): Promise<Plan> {
+    const updater = author ?? this.agentName;
+    return this.tx(async () => {
+      const existing = await this.getPlan(id);
+      if (!existing) throw new Error(`plan not found: ${id}`);
+      const title = patch.title === undefined ? existing.title : patch.title.trim();
+      if (!title) throw new Error('title is required');
+      const updated: Plan = { ...existing, title, status: patch.status ?? existing.status, updatedAt: NOW() };
+      validatePlan(updated); // hard errors abort before anything is written
+      await this.writeJson(this.planPath(id), updated);
+      return updated;
+    }, `plan: update ${id} (${updater})`);
+  }
+
+  /** Next local task id: the highest `T<n>` in the plan + 1 (T1, T2, …). */
+  private nextPlanTaskId(plan: Plan): string {
+    let max = 0;
+    for (const task of plan.tasks) {
+      const m = /^T(\d+)$/.exec(task.id);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }
+    return `T${max + 1}`;
+  }
+
+  async addPlanTask(
+    planId: string,
+    input: {
+      title: string;
+      start: string;
+      end: string;
+      progressSource?: ProgressSource;
+      progress?: number;
+      status?: PlanTaskStatus;
+      deps?: PlanDep[];
+      assignee?: string | null;
+      milestone?: boolean;
+      workItems?: string[];
+      note?: string;
+    },
+    author?: string,
+  ): Promise<Plan> {
+    const updater = author ?? this.agentName;
+    return this.tx(async () => {
+      const plan = await this.getPlan(planId);
+      if (!plan) throw new Error(`plan not found: ${planId}`);
+      const title = input.title.trim();
+      if (!title) throw new Error('title is required');
+      const task: PlanTask = {
+        id: this.nextPlanTaskId(plan),
+        title,
+        start: input.start,
+        end: input.end,
+        progressSource: input.progressSource ?? 'manual',
+        progress: input.progress ?? 0,
+        status: input.status ?? 'todo',
+        deps: input.deps ?? [],
+        assignee: input.assignee ?? null,
+        milestone: input.milestone ?? false,
+        workItems: input.workItems ?? [],
+        note: input.note ?? '',
+      };
+      const next: Plan = { ...plan, tasks: [...plan.tasks, task], updatedAt: NOW() };
+      validatePlan(next); // throws before anything is written
+      await this.writeJson(this.planPath(planId), next);
+      return next;
+    }, (next) => {
+      const task = next.tasks.at(-1);
+      return `plan: add ${planId}/${task?.id} ${clip(task?.title ?? '')} (${updater})`;
+    });
+  }
+
+  async updatePlanTask(
+    planId: string,
+    taskId: string,
+    patch: Partial<Omit<PlanTask, 'id'>>,
+    author?: string,
+  ): Promise<Plan> {
+    const updater = author ?? this.agentName;
+    return this.tx(async () => {
+      const plan = await this.getPlan(planId);
+      if (!plan) throw new Error(`plan not found: ${planId}`);
+      const index = plan.tasks.findIndex((t) => t.id === taskId);
+      if (index < 0) throw new Error(`task not found: ${taskId} (plan ${planId})`);
+      const updated: PlanTask = { ...plan.tasks[index], ...patch, id: plan.tasks[index].id };
+      updated.title = updated.title.trim();
+      if (!updated.title) throw new Error('title is required');
+      const tasks = plan.tasks.slice();
+      tasks[index] = updated;
+      const next: Plan = { ...plan, tasks, updatedAt: NOW() };
+      validatePlan(next); // throws before anything is written
+      await this.writeJson(this.planPath(planId), next);
+      return next;
+    }, `plan: update ${planId}/${taskId} (${updater})`);
+  }
+
+  /**
+   * Remove a task. Refused while other tasks still depend on it — the caller
+   * must remove the dependents (or their deps) first. A plan itself is never
+   * deleted; set `status: 'archived'` instead.
+   */
+  async removePlanTask(planId: string, taskId: string, author?: string): Promise<Plan> {
+    const updater = author ?? this.agentName;
+    return this.tx(async () => {
+      const plan = await this.getPlan(planId);
+      if (!plan) throw new Error(`plan not found: ${planId}`);
+      if (!plan.tasks.some((t) => t.id === taskId)) throw new Error(`task not found: ${taskId} (plan ${planId})`);
+      const dependents = plan.tasks.filter((t) => t.deps.some((d) => d.id === taskId)).map((t) => t.id);
+      if (dependents.length) {
+        throw new Error(`cannot remove ${taskId}: still a dependency of ${dependents.join(', ')}`);
+      }
+      const next: Plan = {
+        ...plan,
+        tasks: plan.tasks.filter((t) => t.id !== taskId),
+        updatedAt: NOW(),
+      };
+      validatePlan(next);
+      await this.writeJson(this.planPath(planId), next);
+      return next;
+    }, `plan: remove ${planId}/${taskId} (${updater})`);
   }
 
   // -------------------------------------------------------------- test cases

@@ -508,6 +508,83 @@ export async function startWebServer(opts: WebServerOptions = {}): Promise<http.
     }
   });
 
+  // ------------------------------------------------- project plans (gantt)
+  // Unlike the other entities (query-param `?project=`), plans carry the
+  // project in the path per the plans design doc §4: /api/projects/:key/plans.
+  async function planStore(req: Request, write: boolean): Promise<Store> {
+    const user = webUser(req);
+    if (write && !user) throw httpError(401, 'please log in');
+    const key = req.params.key;
+    if (!(await workspace.getProject(key))) throw httpError(404, `project not found: ${key}`);
+    await workspace.assertProjectAccess(key, user?.id, { write });
+    return workspace.getStore(key);
+  }
+
+  app.get('/api/projects/:key/plans', async (req, res, next) => {
+    try {
+      res.json(await (await planStore(req, false)).listPlanViews());
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/projects/:key/plans', async (req, res, next) => {
+    try {
+      const { author: _author, ...input } = req.body;
+      res.status(201).json(await (await planStore(req, true)).createPlan({ ...input, author: me(req) }));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.get('/api/projects/:key/plans/:id', async (req, res, next) => {
+    try {
+      const plan = await (await planStore(req, false)).getPlanView(req.params.id);
+      if (!plan) return res.status(404).json({ error: 'plan not found' });
+      res.json(plan);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.patch('/api/projects/:key/plans/:id', async (req, res, next) => {
+    try {
+      const { author: _author, ...patch } = req.body;
+      res.json(await (await planStore(req, true)).updatePlan(req.params.id, patch, me(req)));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.post('/api/projects/:key/plans/:id/tasks', async (req, res, next) => {
+    try {
+      const { author: _author, ...task } = req.body;
+      const plan = await (await planStore(req, true)).addPlanTask(req.params.id, task, me(req));
+      res.status(201).json(plan.tasks.at(-1));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.patch('/api/projects/:key/plans/:id/tasks/:taskId', async (req, res, next) => {
+    try {
+      const { author: _author, ...patch } = req.body;
+      const plan = await (await planStore(req, true)).updatePlanTask(req.params.id, req.params.taskId, patch, me(req));
+      res.json(plan.tasks.find((t) => t.id === req.params.taskId));
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  app.delete('/api/projects/:key/plans/:id/tasks/:taskId', async (req, res, next) => {
+    try {
+      const plan = await (await planStore(req, true)).removePlanTask(req.params.id, req.params.taskId, me(req));
+      res.json({ ok: true, id: req.params.taskId, taskCount: plan.tasks.length });
+    } catch (e) {
+      next(e);
+    }
+  });
+
   // ------------------------------------------------------------------ docs
   app.get('/api/docs', async (req, res, next) => {
     try {

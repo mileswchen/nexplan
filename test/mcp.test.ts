@@ -65,7 +65,14 @@ describe('MCP server tools', () => {
     expect(names).toContain('nexplan_backlog_tree');
     expect(names).toContain('nexplan_backlog_move');
     expect(names).toContain('nexplan_project_update');
-    expect(names.length).toBe(39);
+    expect(names).toContain('nexplan_plan_create');
+    expect(names).toContain('nexplan_plan_list');
+    expect(names).toContain('nexplan_plan_get');
+    expect(names).toContain('nexplan_plan_update');
+    expect(names).toContain('nexplan_plan_task_add');
+    expect(names).toContain('nexplan_plan_task_update');
+    expect(names).toContain('nexplan_plan_task_remove');
+    expect(names.length).toBe(46);
   });
 
   it('adds a backlog item and lists it', async () => {
@@ -454,5 +461,94 @@ describe('MCP server tools', () => {
     const forced = await call('nexplan_test_case_delete', { id: 'TC-1', author: 'codex', force: true });
     expect(forced.isError).toBeFalsy();
     expect((forced.structuredContent as any).deletedRuns).toBe(1);
+  });
+
+  it('manages a plan and its tasks through the plan tools', async () => {
+    // A linked work item drives one task's progress (workitems mode).
+    const wi = await call('nexplan_backlog_add', { items: [{ title: '桥接拦截' }], author: 'codex' });
+    const wiId = (wi.structuredContent as any).created[0].id;
+    await call('nexplan_backlog_claim', { id: wiId, assignee: 'codex' }); // in_progress → 50
+
+    const created = await call('nexplan_plan_create', { title: 'P1 执行计划', author: 'codex' });
+    expect(created.isError).toBeFalsy();
+    const planId = (created.structuredContent as any).id;
+    expect(planId).toBe('PLAN-1');
+
+    // Dependency chain T1 → T2 → T3.
+    const t1 = await call('nexplan_plan_task_add', {
+      id: planId, title: '地基', start: '2026-11-24', end: '2026-11-26', author: 'codex',
+    });
+    expect((t1.structuredContent as any).task.id).toBe('T1');
+    const t2 = await call('nexplan_plan_task_add', {
+      id: planId, title: '主体', start: '2026-11-27', end: '2026-11-28',
+      deps: [{ id: 'T1' }], progressSource: 'workitems', workItems: [wiId], author: 'codex',
+    });
+    expect((t2.structuredContent as any).task.id).toBe('T2');
+    await call('nexplan_plan_task_add', {
+      id: planId, title: '上线', start: '2026-11-29', end: '2026-11-29',
+      milestone: true, deps: [{ id: 'T2' }], author: 'codex',
+    });
+
+    // Hard validation is refused by the tools.
+    const backwards = await call('nexplan_plan_task_add', {
+      id: planId, title: '倒挂', start: '2026-12-05', end: '2026-12-01', author: 'codex',
+    });
+    expect(backwards.isError).toBe(true);
+    expect(backwards.content[0].text).toMatch(/is before start/);
+    const badDate = await call('nexplan_plan_task_add', {
+      id: planId, title: '坏日期', start: '2026-12-1', end: '2026-12-02', author: 'codex',
+    });
+    expect(badDate.isError).toBe(true); // zod catches the format first
+
+    // Re-parenting T1 under T3 would close a cycle — refused, nothing written.
+    const cycle = await call('nexplan_plan_task_update', {
+      id: planId, task: 'T1', deps: [{ id: 'T3' }], author: 'codex',
+    });
+    expect(cycle.isError).toBe(true);
+    expect(cycle.content[0].text).toMatch(/cycle/);
+
+    // plan_get carries effective progress (workitems mode → 50 from in_progress WI).
+    const got = await call('nexplan_plan_get', { id: planId });
+    const view = got.structuredContent as any;
+    expect(view.tasks).toHaveLength(3);
+    expect(view.tasks.map((t: any) => t.id)).toEqual(['T1', 'T2', 'T3']);
+    expect(view.tasks[0].effectiveProgress).toBe(0);
+    expect(view.tasks[1].effectiveProgress).toBe(50);
+    expect(view.tasks[2].effectiveProgress).toBe(0); // milestone still todo
+    expect(view.summary).toEqual({ start: '2026-11-24', end: '2026-11-29', progress: 17 }); // (0*3+50*2+0*1)/6
+    expect(view.warnings).toEqual([]);
+    expect(view.status).toBe('draft');
+
+    // Marking the milestone done flips its effective progress to 100 (manual rule).
+    const doneUpdate = await call('nexplan_plan_task_update', {
+      id: planId, task: 'T3', status: 'done', author: 'codex',
+    });
+    expect((doneUpdate.structuredContent as any).task.status).toBe('done');
+    const afterDone = await call('nexplan_plan_get', { id: planId });
+    expect(((afterDone.structuredContent as any).tasks[2]).effectiveProgress).toBe(100);
+    expect(((afterDone.structuredContent as any).summary as any).progress).toBe(33); // (0*3+50*2+100*1)/6
+
+    // plan_list carries the same derived view.
+    const listed = await call('nexplan_plan_list', {});
+    expect((listed.structuredContent as any).items).toHaveLength(1);
+    expect((listed.structuredContent as any).items[0].id).toBe(planId);
+
+    // The depended-on milestone cannot be removed while T2 references it.
+    const blocked = await call('nexplan_plan_task_remove', { id: planId, task: 'T2', author: 'codex' });
+    expect(blocked.isError).toBe(true);
+    expect(blocked.content[0].text).toMatch(/still a dependency of T3/);
+    // T1 is depended on by T2 as well — clear the edge first, then remove.
+    const stillBlocked = await call('nexplan_plan_task_remove', { id: planId, task: 'T1', author: 'codex' });
+    expect(stillBlocked.isError).toBe(true);
+    await call('nexplan_plan_task_update', { id: planId, task: 'T2', deps: [], author: 'codex' });
+    const removed = await call('nexplan_plan_task_remove', { id: planId, task: 'T1', author: 'codex' });
+    expect(removed.isError).toBeFalsy();
+    expect((removed.structuredContent as any).taskCount).toBe(2);
+
+    // Archive replaces deletion.
+    const archived = await call('nexplan_plan_update', { id: planId, status: 'archived', author: 'codex' });
+    expect((archived.structuredContent as any).status).toBe('archived');
+    const gone = await call('nexplan_plan_get', { id: 'PLAN-404' });
+    expect(gone.isError).toBe(true);
   });
 });

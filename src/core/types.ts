@@ -133,6 +133,88 @@ export interface Bug {
   testRun?: string | null;
 }
 
+// ---- project plans (gantt) ---------------------------------------------------
+
+export type PlanStatus = 'draft' | 'active' | 'done' | 'archived';
+export type PlanTaskStatus = 'todo' | 'doing' | 'done';
+
+/**
+ * Where a task's progress number comes from. `manual` keeps the stored
+ * `progress` editable by hand; `workitems` derives progress from the linked
+ * work items' statuses at read time and stays read-only in the UI.
+ */
+export type ProgressSource = 'manual' | 'workitems';
+
+/**
+ * Work item status → percent progress, applied when a task's progressSource is
+ * `workitems`. One table so the Gantt view, `nexplan_plan_get` and REST agree.
+ */
+export const WI_STATUS_PROGRESS: Record<WorkItemStatus, number> = {
+  backlog: 0,
+  todo: 0,
+  in_progress: 50,
+  review: 80,
+  done: 100,
+  blocked: 0,
+};
+
+export const PLAN_STATUSES: PlanStatus[] = ['draft', 'active', 'done', 'archived'];
+export const PLAN_TASK_STATUSES: PlanTaskStatus[] = ['todo', 'doing', 'done'];
+export const PROGRESS_SOURCES: ProgressSource[] = ['manual', 'workitems'];
+
+/** A finish-to-start dependency on another task of the same plan. */
+export interface PlanDep {
+  id: string; // predecessor task id (T-N)
+  /** Reserved for SS/FF (post-v1); v1 only supports FS and ignores the value. */
+  type?: 'FS';
+}
+
+export interface PlanTask {
+  id: string; // T-N, unique inside its plan
+  title: string;
+  start: string; // YYYY-MM-DD
+  end: string; // YYYY-MM-DD, >= start; a milestone requires start === end
+  progressSource: ProgressSource;
+  progress: number; // 0-100; only consulted in `manual` mode
+  status: PlanTaskStatus;
+  deps: PlanDep[]; // finish-to-start predecessors
+  assignee: string | null; // agent id or 'user'
+  milestone: boolean; // true → drawn as a diamond
+  workItems: string[]; // soft links to WI-N ids (existence checked softly)
+  note: string;
+}
+
+export interface Plan {
+  id: string; // PLAN-N
+  title: string;
+  status: PlanStatus;
+  createdBy: string; // 'user' or agent name
+  createdAt: string; // ISO
+  updatedAt: string; // ISO
+  tasks: PlanTask[];
+}
+
+/** A plan task decorated with derived progress (never persisted). */
+export interface PlanTaskView extends PlanTask {
+  /** progressSource-aware progress: manual → stored (`done` → 100); workitems → WI aggregation. */
+  effectiveProgress: number;
+}
+
+/** Derived, never-persisted plan rollups. */
+export interface PlanSummary {
+  start: string | null; // min task start
+  end: string | null; // max task end
+  progress: number; // duration-weighted effective progress across tasks
+}
+
+/** A plan decorated with per-task progress, derived dates and validation warnings. */
+export interface PlanView extends Plan {
+  tasks: PlanTaskView[];
+  summary: PlanSummary;
+  /** Non-blocking findings from validatePlan — FS conflicts and the like. */
+  warnings: string[];
+}
+
 export type DocType = 'design' | 'decision' | 'adr' | 'architecture' | 'notes';
 export type DocStatus = 'draft' | 'review' | 'approved' | 'superseded';
 

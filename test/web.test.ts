@@ -286,3 +286,59 @@ describe('web dashboard: project key and name editing', () => {
     expect(nameOnly.body.name).toBe('Just the name');
   });
 });
+
+describe('web dashboard: project plans', () => {
+  it('serves plan CRUD and task management over REST, gated by login', async () => {
+    // Anonymous writes are refused; reads stay open on an un-rostered project.
+    const anon = await req('POST', '/api/projects/default/plans', { title: 'anon' }, false);
+    expect(anon.status).toBe(401);
+
+    const created = await req('POST', '/api/projects/default/plans', { title: 'P1 执行计划' });
+    expect(created.status).toBe(201);
+    const plan = created.body as Json;
+    expect(plan.id).toBe('PLAN-1');
+    expect(plan.status).toBe('draft');
+    expect(plan.tasks).toEqual([]);
+
+    // A task with a linked work item (workitems mode) and one manual task.
+    const wi = (await req('POST', '/api/workitems', { title: '甘特渲染' })).body as unknown as Json[];
+    const wiId = wi[0].id as string;
+    const manual = await req('POST', `/api/projects/default/plans/${plan.id}/tasks`, {
+      title: '手工任务', start: '2026-11-24', end: '2026-11-25', progress: 30,
+    });
+    expect(manual.status).toBe(201);
+    const auto = await req('POST', `/api/projects/default/plans/${plan.id}/tasks`, {
+      title: '自动任务', start: '2026-11-24', end: '2026-11-27',
+      progressSource: 'workitems', workItems: [wiId],
+    });
+    expect(((auto.body as Json).id as string)).toBe('T2');
+
+    // Validation is shared with MCP: end < start is refused, FS conflicts warn.
+    const backwards = await req('POST', `/api/projects/default/plans/${plan.id}/tasks`, {
+      title: '倒挂', start: '2026-12-05', end: '2026-12-01',
+    });
+    expect(backwards.status).toBe(500);
+    expect(String(backwards.body.error)).toMatch(/is before start/);
+
+    const view = (await req('GET', `/api/projects/default/plans/${plan.id}`)).body as Json;
+    expect(((view.tasks as Json[])[0]).effectiveProgress).toBe(30);
+    expect(((view.tasks as Json[])[1]).effectiveProgress).toBe(0); // WI still backlog
+    expect((view.summary as Json).progress).toBe(10); // (30*2+0*4)/6
+
+    // Task edit + derived plan list.
+    const patched = await req('PATCH', `/api/projects/default/plans/${plan.id}/tasks/T1`, { progress: 80 });
+    expect(patched.status).toBe(200);
+    const listed = (await req('GET', '/api/projects/default/plans')).body as unknown as Json[];
+    expect(listed.find((p) => p.id === plan.id)?.warnings).toEqual([]);
+
+    // Plan meta update and delete-gating.
+    const meta = await req('PATCH', `/api/projects/default/plans/${plan.id}`, { status: 'active' });
+    expect(meta.status).toBe(200);
+    const del = await req('DELETE', `/api/projects/default/plans/${plan.id}/tasks/T1`);
+    expect(del.status).toBe(200);
+
+    // Unknown plan / project → 404.
+    expect((await req('GET', '/api/projects/default/plans/PLAN-999')).status).toBe(404);
+    expect((await req('GET', '/api/projects/nope/plans')).status).toBe(404);
+  });
+});

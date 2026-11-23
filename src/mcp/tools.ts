@@ -26,6 +26,9 @@ const TESTCASE_TYPES = [
 ] as const;
 const TESTCASE_STATUSES = ['draft', 'active', 'deprecated'] as const;
 const TEST_RESULTS = ['pass', 'fail', 'blocked', 'skipped'] as const;
+const PLAN_STATUSES = ['draft', 'active', 'done', 'archived'] as const;
+const PLAN_TASK_STATUSES = ['todo', 'doing', 'done'] as const;
+const PROGRESS_SOURCES = ['manual', 'workitems'] as const;
 
 const priorities = z.enum(PRIORITIES);
 const itemTypes = z.enum(ITEM_TYPES);
@@ -39,6 +42,10 @@ const userKinds = z.enum(USER_KINDS);
 const testCaseTypes = z.enum(TESTCASE_TYPES);
 const testCaseStatuses = z.enum(TESTCASE_STATUSES);
 const testResults = z.enum(TEST_RESULTS);
+const planStatuses = z.enum(PLAN_STATUSES);
+const planTaskStatuses = z.enum(PLAN_TASK_STATUSES);
+const progressSources = z.enum(PROGRESS_SOURCES);
+const planDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD');
 
 // A tool handler returns the MCP CallToolResult. `text` is the universal
 // representation; `structuredContent` is an optional JSON view for typed clients.
@@ -985,6 +992,187 @@ export function registerNexplanTools(server: McpServer, workspace: Workspace): v
         })),
         archive: await store.archiveSummary(),
       });
+    },
+  );
+
+  // ------------------------------------------------------------ project plans
+
+  const planDeps = z
+    .array(z.object({ id: z.string().min(1), type: z.literal('FS').optional() }))
+    .describe('Finish-to-start predecessors (task ids of the same plan, e.g. [{id:"T1"}]).');
+
+  const planTaskBody = {
+    title: z.string().min(1),
+    start: planDate.describe('Start date (YYYY-MM-DD).'),
+    end: planDate.describe('End date (YYYY-MM-DD); must be >= start. A milestone needs start === end.'),
+    progressSource: progressSources
+      .optional()
+      .describe("Where progress comes from: manual (editable) or workitems (derived from linked WI statuses, read-only). Default: manual."),
+    progress: z
+      .number()
+      .min(0)
+      .max(100)
+      .optional()
+      .describe('Manual progress 0-100. Derived (ignored on write) in workitems mode.'),
+    status: planTaskStatuses.optional().describe('Default: todo.'),
+    deps: planDeps.optional(),
+    assignee: z.string().nullish(),
+    milestone: z.boolean().optional().describe('true renders a diamond and requires start === end.'),
+    workItems: z
+      .array(z.string())
+      .optional()
+      .describe('Soft-linked work items (WI-N); workitems mode aggregates their statuses (todo=0/in_progress=50/review=80/done=100, averaged).'),
+    note: z.string().optional(),
+  };
+
+  server.registerTool(
+    'nexplan_plan_create',
+    {
+      title: 'Create a project plan',
+      description:
+        'Create a project plan (PLAN-N) to hold dated, dependent tasks rendered as a Gantt chart. ' +
+        'Plans are never deleted; set status=archived instead.',
+      inputSchema: z.object({
+        title: z.string().min(1),
+        status: planStatuses.optional().describe('Default: draft.'),
+        author: z.string().optional().describe('Attribution (agent or user name).'),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args, { write: true });
+      return ok(await store.createPlan({ title: args.title, status: args.status, author: actor }));
+    },
+  );
+
+  server.registerTool(
+    'nexplan_plan_list',
+    {
+      title: 'List project plans',
+      description:
+        'List the project\'s plans with derived values: span (min start / max end), ' +
+        'duration-weighted progress, per-task effective progress and validation warnings (FS conflicts).',
+      inputSchema: z.object({ project: projectOpt }),
+    },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      const items = await store.listPlanViews();
+      return ok({ items, count: items.length });
+    },
+  );
+
+  server.registerTool(
+    'nexplan_plan_get',
+    {
+      title: 'Get a project plan',
+      description:
+        'Get one plan with its tasks, each carrying the effective progress ' +
+        '(manual → stored progress, done → 100; workitems → linked WI status aggregation) plus warnings.',
+      inputSchema: z.object({ id: z.string().min(1).describe('Plan id (PLAN-N).'), project: projectOpt }),
+    },
+    async (args) => {
+      const { store } = await projectStore(workspace, args);
+      const plan = await store.getPlanView(args.id);
+      if (!plan) throw new Error(`plan not found: ${args.id}`);
+      return ok(plan);
+    },
+  );
+
+  server.registerTool(
+    'nexplan_plan_update',
+    {
+      title: 'Update a project plan',
+      description: 'Update a plan\'s meta (title, status). Tasks are managed via nexplan_plan_task_add/update/remove.',
+      inputSchema: z.object({
+        id: z.string().min(1).describe('Plan id (PLAN-N).'),
+        title: z.string().optional(),
+        status: planStatuses.optional().describe("draft | active | done | archived (archived replaces deletion)."),
+        author: z.string().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args, { write: true });
+      return ok(
+        await store.updatePlan(args.id, { title: args.title, status: args.status }, actor),
+      );
+    },
+  );
+
+  server.registerTool(
+    'nexplan_plan_task_add',
+    {
+      title: 'Add a task to a plan',
+      description:
+        'Add a dated task (T-N) to a plan with optional FS dependencies, milestone flag, assignee ' +
+        'and linked work items. The whole plan is validated before the write (dates, end>=start, ' +
+        'milestone start===end, deps exist, acyclic).',
+      inputSchema: z.object({
+        id: z.string().min(1).describe('Plan id (PLAN-N).'),
+        ...planTaskBody,
+        author: z.string().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { id, author: _author, project: _project, ...task } = args;
+      const { store, actor } = await projectStore(workspace, args, { write: true });
+      const plan = await store.addPlanTask(id, task, actor);
+      return ok({ planId: plan.id, task: plan.tasks.at(-1) });
+    },
+  );
+
+  server.registerTool(
+    'nexplan_plan_task_update',
+    {
+      title: 'Update a plan task',
+      description:
+        'Update any task field (dates, progress, status, deps, milestone, work items…). The whole ' +
+        'plan is re-validated before the write, so an edit that would create a cycle is refused.',
+      inputSchema: z.object({
+        id: z.string().min(1).describe('Plan id (PLAN-N).'),
+        task: z.string().min(1).describe('Task id (T-N).'),
+        title: z.string().optional(),
+        start: planDate.optional(),
+        end: planDate.optional(),
+        progressSource: progressSources.optional(),
+        progress: z.number().min(0).max(100).optional(),
+        status: planTaskStatuses.optional(),
+        deps: planDeps.optional(),
+        assignee: z.string().nullish(),
+        milestone: z.boolean().optional(),
+        workItems: z.array(z.string()).optional(),
+        note: z.string().optional(),
+        author: z.string().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { id, task, author: _author, project: _project, ...patch } = args;
+      const { store, actor } = await projectStore(workspace, args, { write: true });
+      const plan = await store.updatePlanTask(id, task, patch, actor);
+      return ok({ planId: plan.id, task: plan.tasks.find((t) => t.id === task) });
+    },
+  );
+
+  server.registerTool(
+    'nexplan_plan_task_remove',
+    {
+      title: 'Remove a task from a plan',
+      description:
+        'Remove a task from a plan. Refused while other tasks still depend on it — remove the ' +
+        'dependents first. Plans themselves are archived, never deleted.',
+      inputSchema: z.object({
+        id: z.string().min(1).describe('Plan id (PLAN-N).'),
+        task: z.string().min(1).describe('Task id (T-N).'),
+        author: z.string().optional(),
+        project: projectOpt,
+      }),
+    },
+    async (args) => {
+      const { store, actor } = await projectStore(workspace, args, { write: true });
+      const plan = await store.removePlanTask(args.id, args.task, actor);
+      return ok({ planId: plan.id, removed: args.task, taskCount: plan.tasks.length });
     },
   );
 }
